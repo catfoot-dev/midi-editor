@@ -6,10 +6,10 @@
 
 ## Highlights
 
-- ✅ **Cross-platform**: Windows / macOS / Linux
-- ✅ **Simple by design**: minimal UI, fast workflow
-- ✅ **Open-source**: contributions welcome
-- ✅ **Standard MIDI File (SMF)** support (import/export)
+- [x] **Cross-platform**: Windows / macOS / Linux
+- [x] **Simple by design**: minimal UI, fast workflow
+- [x] **Open-source**: contributions welcome
+- [x] **Standard MIDI File (SMF)** support (import/export)
 
 > Status: **WIP / Experimental** — breaking changes may happen until `v1.0`.
 
@@ -22,8 +22,6 @@
 - Quantize / humanize (basic utilities) *(planned / partial)*
 - Tempo & time signature support *(planned / partial)*
 - Import / export `.mid` (SMF)
-
-> Edit this list to match what you actually support today.
 
 ---
 
