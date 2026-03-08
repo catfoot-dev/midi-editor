@@ -1,230 +1,534 @@
-use std::collections::HashMap;
-use midly::{MetaMessage, MidiMessage, Timing, TrackEventKind};
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt,
+    path::Path,
+};
 
-use crate::audio::midi_struct::{MidiData, MidiMeta, MidiTrack};
+use midly::{MetaMessage, MidiMessage, Smf, Timing, TrackEventKind};
 
-pub struct MidiManager {
-    is_parsing: bool,
-    data: Vec<u8>,
-    pub total_seconds: f64,
-    pub ppq: f64,
-    pub solo_track: Option<u8>,
-    pub meta: MidiMeta,
-    pub midi: HashMap<u8, HashMap<u8, Vec<MidiData>>>,
-    pub tracks: HashMap<u8, MidiTrack>,
+use crate::audio::midi_struct::{
+    seconds_for_tick_with_tempo, NoteSpan, ProgramChangeEvent, Song, SongMeta, TempoChange,
+    TrackModel,
+};
+
+#[derive(Debug)]
+pub enum MidiLoadError {
+    Io(std::io::Error),
+    Parse(midly::Error),
+    UnsupportedTimecode,
 }
 
-impl Default for MidiManager {
-    fn default() -> Self {
-        Self {
-            is_parsing: false,
-            data: Vec::new(),
-            total_seconds: 0.0,
-            ppq: 0.0,
-            solo_track: None,
-            meta: MidiMeta {
-                track_number: 0,
-                text: String::new(),
-                copyright: String::new(),
-                program_name: String::new(),
-                tempo: 0.0,
-                time_signature: [0,0,0,0],
-                key_signature: 0,
-                is_minor: true,
-                track_name: String::new(),
-                marker: String::new(),
-            },
-            midi: HashMap::new(),
-            tracks: HashMap::new(),
+impl fmt::Display for MidiLoadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "failed to read MIDI file: {error}"),
+            Self::Parse(error) => write!(f, "failed to parse MIDI file: {error}"),
+            Self::UnsupportedTimecode => write!(f, "timecode-based MIDI files are not supported"),
         }
     }
+}
+
+impl std::error::Error for MidiLoadError {}
+
+pub struct LoadedSong {
+    pub file_name: String,
+    pub song: Song,
+}
+
+pub enum LoadResult {
+    Success(LoadedSong),
+    Error(String),
+}
+
+#[derive(Default)]
+pub struct MidiManager {
+    is_loading: bool,
+    song: Option<Song>,
+    pending_result: Option<LoadResult>,
 }
 
 impl MidiManager {
-    pub fn is_loaded(&mut self) -> bool {
-        return !self.is_parsing && self.data.len() > 0;
+    // 곡 로드가 끝났고 현재 참조 가능한 Song이 있는지 확인한다.
+    pub fn is_loaded(&self) -> bool {
+        !self.is_loading && self.song.is_some()
     }
 
-    pub fn open(&mut self, file_path: &str) {
-        if self.is_parsing {
-            return;
-        }
+    // 백그라운드 로딩 중인지 UI가 확인할 때 사용한다.
+    pub fn is_loading(&self) -> bool {
+        self.is_loading
+    }
 
-        self.data = std::fs::read(file_path).unwrap();
-        let smf = midly::Smf::parse(&self.data).unwrap();
+    // 읽기 전용 Song 참조를 반환한다.
+    pub fn song(&self) -> Option<&Song> {
+        self.song.as_ref()
+    }
 
-        self.ppq = match smf.header.timing {
-            Timing::Metrical(ticks) => ticks.as_int() as f64,
-            Timing::Timecode(_, _) => 0.0,
+    // 트랙 설정 수정처럼 Song 내부를 갱신해야 할 때 사용한다.
+    pub fn song_mut(&mut self) -> Option<&mut Song> {
+        self.song.as_mut()
+    }
+
+    // 새 파일 로드를 시작하기 전에 상태를 로딩 중으로 전환한다.
+    pub fn begin_loading(&mut self) {
+        self.is_loading = true;
+        self.pending_result = None;
+    }
+
+    // 백그라운드 스레드가 성공 결과를 전달할 때 호출된다.
+    pub fn finish_loading(&mut self, file_name: String, song: Song) {
+        self.is_loading = false;
+        self.pending_result = Some(LoadResult::Success(LoadedSong { file_name, song }));
+    }
+
+    // 백그라운드 스레드가 실패 원인을 전달할 때 호출된다.
+    pub fn finish_loading_error(&mut self, error: String) {
+        self.is_loading = false;
+        self.pending_result = Some(LoadResult::Error(error));
+    }
+
+    // 메인 스레드가 아직 처리하지 않은 로드 결과를 한 번만 꺼낸다.
+    pub fn take_pending_result(&mut self) -> Option<LoadResult> {
+        self.pending_result.take()
+    }
+
+    // 성공적으로 로드된 Song을 현재 상태로 교체한다.
+    pub fn apply_song(&mut self, song: Song) {
+        self.song = Some(song);
+    }
+
+    // 곡 닫기 시 로딩 상태와 현재 Song을 함께 비운다.
+    pub fn close(&mut self) {
+        self.is_loading = false;
+        self.pending_result = None;
+        self.song = None;
+    }
+
+    // 파일 시스템에서 MIDI 파일을 읽고 Song으로 파싱한다.
+    pub fn load_file(file_path: &Path) -> Result<Song, MidiLoadError> {
+        let data = std::fs::read(file_path).map_err(MidiLoadError::Io)?;
+        Self::parse_bytes(&data)
+    }
+
+    // raw MIDI 바이트를 파싱해 트랙/tempo/note span 구조로 정규화한다.
+    fn parse_bytes(data: &[u8]) -> Result<Song, MidiLoadError> {
+        let smf = Smf::parse(data).map_err(MidiLoadError::Parse)?;
+        let ppq = match smf.header.timing {
+            Timing::Metrical(ticks) => ticks.as_int(),
+            Timing::Timecode(_, _) => return Err(MidiLoadError::UnsupportedTimecode),
         };
 
-        self.meta.tempo = 500_000f64;
-        let mut tempo_changes = vec![(0u64, self.meta.tempo)];
-        let mut max_absolute_tick = 0u64;
-        
-        for track in smf.tracks.iter() {
-            let mut current_tick = 0u64;
+        let mut meta = SongMeta::default();
+        let mut tempo_changes = vec![TempoChange {
+            tick: 0,
+            micros_per_quarter: 500_000,
+        }];
+        let mut tracks = Vec::with_capacity(smf.tracks.len());
+        let mut total_ticks = 0_u64;
 
-            for event in track.iter() {
+        for (track_index, track) in smf.tracks.iter().enumerate() {
+            let mut current_tick = 0_u64;
+            let mut parsed_track = TrackAccumulator::new(track_index);
+
+            for event in track {
                 current_tick += event.delta.as_int() as u64;
-                
+
                 match event.kind {
-                    TrackEventKind::Meta(meta) => {
-                        match meta {
-                            MetaMessage::TrackName(data) => {
-                                // 트랙 이름
-                                self.meta.track_name = String::from_utf8_lossy(data).into_owned().replace("\0", "");
-                                // println!("TrackName: {:?}", self.meta.track_name);
-                            }
-                            MetaMessage::InstrumentName(data) => {
-                                let instrument_name = String::from_utf8_lossy(data).into_owned().replace("\0", "");
-                                println!("Intrument Name: {:?}", instrument_name);
-                                // self.tracks.get()
-                            }
-                            MetaMessage::ProgramName(program_name) => {
-                                // 프로그램 이름
-                                self.meta.program_name = String::from_utf8_lossy(program_name).into_owned().replace("\0", "");
-                                // println!("Program Name: {:#?}", self.meta.program_name);
-                            }
-                            MetaMessage::Tempo(tempo) => {
-                                // 템포
-                                self.meta.tempo = tempo.as_int() as f64;
-                                tempo_changes.push((current_tick, tempo.as_int() as f64));
-                            }
-                            MetaMessage::TimeSignature(nn, dd, cc, bb) => {
-                                // 박자
-                                self.meta.time_signature = [nn, dd, cc, bb];
-                                // println!("Time Signature: {}/{} (Clocks per click: {}, 32nd notes per quarter note: {})",
-                                //     nn, 2u8.pow(dd as u32), cc, bb);
-                            }
-                            MetaMessage::KeySignature(sf, mi) => {
-                                // 조표: minor 단조, major 장조
-                                self.meta.is_minor = mi;
-                                self.meta.key_signature = sf;
-                                // let mode = if mi { "Minor" } else { "Major" };
-                                // println!("Key Signature: {} {}, Sharps/Flats: {}", sf, mode,
-                                //     if sf > 0 { format!("{} Sharps", sf) }
-                                //     else if sf < 0 { format!("{} Flats", -sf) }
-                                //     else { "No Sharps or Flats".to_string() });
-                            }
-                            MetaMessage::Unknown(cue_point, data) => {
-                                if cue_point == 0x0A {
-                                    let writer = String::from_utf8_lossy(data).into_owned().replace("\0", "");
-                                    println!("Writer: {}", writer);
-                                } else {
-                                    println!("Unknown Meta Message: Cue Point: {}, Data: {:#?}", cue_point, data);
-                                }
-                            }
-                            _ => println!("event - meta: {:?}", event)
-                        }
+                    TrackEventKind::Meta(message) => {
+                        apply_meta_event(message, current_tick, &mut meta, &mut parsed_track, &mut tempo_changes);
                     }
                     TrackEventKind::Midi { channel, message } => {
-                        let channel = channel.as_int();
-                        if !self.midi.contains_key(&channel) {
-                            self.midi.insert(channel, HashMap::new());
-                        }
-                        let midi = self.midi.get_mut(&channel).unwrap();
-
-                        if !self.tracks.contains_key(&channel) {
-                            let track = MidiTrack {
-                                name: "Track".to_string(),
-                                channel,
-                                instrument: 0,
-                                instrument_name: String::new(),
-                                is_muted: false,
-                                volume: 100.0,
-                            };
-                            self.tracks.insert(channel, track);
-                        }
-
-                        match message {
-                            MidiMessage::ProgramChange { program } => {
-                                // 채널 별 악기
-                                self.tracks.get_mut(&channel).unwrap().instrument = program.as_int();
-                            }
-                            MidiMessage::NoteOn { key, vel } => {
-                                // 노트 온 (velocity 값이 0으로 오프가 되는 경우도 있음)
-                                let key = key.as_int();
-                                let data = MidiData {
-                                    is_on: true,
-                                    tick: current_tick,
-                                    velocity: vel.as_int(),
-                                };
-                                if !midi.contains_key(&key) {
-                                    midi.insert(key, vec![data]);
-                                } else {
-                                    midi.get_mut(&key).unwrap().push(data);
-                                }
-                            }
-                            MidiMessage::NoteOff { key, vel } => {
-                                // 노트 오프
-                                let key = key.as_int();
-                                let data = MidiData {
-                                    is_on: false,
-                                    tick: current_tick,
-                                    velocity: vel.as_int(),
-                                };
-                                if !midi.contains_key(&key) {
-                                    midi.insert(key, vec![data]);
-                                } else {
-                                    midi.get_mut(&key).unwrap().push(data);
-                                }
-                            }
-                            _ => println!("event - midi: {:?}", event)
-                        }
+                        apply_midi_event(channel.as_int(), message, current_tick, &mut parsed_track);
                     }
-                    _ => println!("event: {:?}", event)
+                    _ => {}
                 }
             }
 
-            // 전체 플레이 시간 계산
-            if current_tick > max_absolute_tick {
-                max_absolute_tick = current_tick;
-            }
+            parsed_track.close_dangling_notes(current_tick);
+            total_ticks = total_ticks.max(current_tick);
+            tracks.push(parsed_track.finish());
+        }
 
-            self.total_seconds = 0.0;
-            let mut last_tick = 0u64;
-            let mut current_tempo = tempo_changes[0].1;
+        // tempo 이벤트는 트랙 순서와 무관하게 절대 tick 기준으로 다시 정렬한다.
+        let tempo_changes = normalize_tempo_changes(tempo_changes);
+        let total_seconds = seconds_for_tick_with_tempo(ppq, &tempo_changes, total_ticks);
 
-            for &(tick, tempo) in &tempo_changes {
-                if tick > max_absolute_tick { break; }
+        Ok(Song {
+            ppq,
+            total_ticks,
+            total_seconds,
+            meta,
+            tempo_changes,
+            tracks,
+        })
+    }
+}
 
-                let ticks_passed = tick - last_tick;
+struct TrackAccumulator {
+    track_index: usize,
+    name: String,
+    channel: Option<u8>,
+    program: u8,
+    instrument_name: String,
+    program_changes: Vec<ProgramChangeEvent>,
+    note_spans: Vec<NoteSpan>,
+    active_notes: HashMap<u8, VecDeque<ActiveNote>>,
+}
 
-                let seconds_per_tick = current_tempo / 1_000_000.0 / self.ppq;
-                self.total_seconds += ticks_passed as f64 * seconds_per_tick;
+impl TrackAccumulator {
+    // 파싱 중 사용할 임시 트랙 버퍼를 초기화한다.
+    fn new(track_index: usize) -> Self {
+        Self {
+            track_index,
+            name: format!("Track {}", track_index + 1),
+            channel: None,
+            program: 0,
+            instrument_name: String::new(),
+            program_changes: Vec::new(),
+            note_spans: Vec::new(),
+            active_notes: HashMap::new(),
+        }
+    }
 
-                last_tick = tick;
-                current_tempo = tempo;
-            }
+    // note off 또는 velocity 0 note on을 만나면 가장 앞선 note on과 짝을 맞춘다.
+    fn close_note(&mut self, key: u8, end_tick: u64) {
+        if let Some(notes) = self.active_notes.get_mut(&key)
+            && let Some(active_note) = notes.pop_front()
+        {
+            self.note_spans.push(NoteSpan {
+                key,
+                start_tick: active_note.start_tick,
+                end_tick,
+                velocity: active_note.velocity,
+            });
+        }
+    }
 
-            if max_absolute_tick > last_tick {
-                let ticks_passed = max_absolute_tick - last_tick;
-                let seconds_per_tick = current_tempo / 1_000_000.0 / self.ppq;
-                self.total_seconds += ticks_passed as f64 * seconds_per_tick;
+    // 파일이 비정상적이더라도 열린 노트는 트랙 끝에서 닫아 시각화와 재생을 유지한다.
+    fn close_dangling_notes(&mut self, end_tick: u64) {
+        for (key, active_notes) in &mut self.active_notes {
+            while let Some(active_note) = active_notes.pop_front() {
+                self.note_spans.push(NoteSpan {
+                    key: *key,
+                    start_tick: active_note.start_tick,
+                    end_tick,
+                    velocity: active_note.velocity,
+                });
             }
         }
     }
 
-    pub fn close(&mut self) {
-        self.is_parsing = false;
-        self.data = Vec::new();
-        self.total_seconds = 0.0;
-        self.ppq = 0.0;
-        self.solo_track = None;
-        self.meta = MidiMeta {
-            track_number: 0,
-            program_name: String::new(),
-            tempo: 0.0,
-            time_signature: [0,0,0,0],
-            key_signature: 0,
-            is_minor: true,
-            text: String::new(),
-            copyright: String::new(),
-            track_name: String::new(),
-            marker: String::new(),
-        };
-        self.tracks = HashMap::new();
-        self.midi = HashMap::new();
+    // 정렬과 기본 UI 상태를 마무리한 뒤 최종 TrackModel로 변환한다.
+    fn finish(mut self) -> TrackModel {
+        self.note_spans
+            .sort_by_key(|note| (note.start_tick, note.end_tick, note.key));
+        self.program_changes
+            .sort_by_key(|program_change| program_change.tick);
+
+        TrackModel {
+            track_index: self.track_index,
+            name: self.name,
+            channel: self.channel.unwrap_or(0),
+            program: self.program,
+            instrument_name: self.instrument_name,
+            program_changes: self.program_changes,
+            note_spans: self.note_spans,
+            is_muted: false,
+            volume: 100.0,
+        }
+    }
+}
+
+struct ActiveNote {
+    start_tick: u64,
+    velocity: u8,
+}
+
+// 메타 이벤트를 곡 전체 메타데이터와 트랙 메타데이터로 분배한다.
+fn apply_meta_event(
+    message: MetaMessage<'_>,
+    current_tick: u64,
+    meta: &mut SongMeta,
+    track: &mut TrackAccumulator,
+    tempo_changes: &mut Vec<TempoChange>,
+) {
+    match message {
+        MetaMessage::TrackName(data) => {
+            let value = sanitize_text(data);
+            if !value.is_empty() {
+                track.name = value.clone();
+                if meta.title.is_empty() {
+                    meta.title = value;
+                }
+            }
+        }
+        MetaMessage::InstrumentName(data) => {
+            let value = sanitize_text(data);
+            if !value.is_empty() {
+                track.instrument_name = value;
+            }
+        }
+        MetaMessage::ProgramName(data) => {
+            let value = sanitize_text(data);
+            if meta.program_name.is_empty() {
+                meta.program_name = value;
+            }
+        }
+        MetaMessage::Text(data) => {
+            let value = sanitize_text(data);
+            if meta.text.is_empty() {
+                meta.text = value;
+            }
+        }
+        MetaMessage::Copyright(data) => {
+            let value = sanitize_text(data);
+            if meta.copyright.is_empty() {
+                meta.copyright = value;
+            }
+        }
+        MetaMessage::Marker(data) => {
+            let value = sanitize_text(data);
+            if meta.marker.is_empty() {
+                meta.marker = value;
+            }
+        }
+        MetaMessage::Tempo(tempo) => {
+            tempo_changes.push(TempoChange {
+                tick: current_tick,
+                micros_per_quarter: tempo.as_int(),
+            });
+        }
+        MetaMessage::TimeSignature(nn, dd, cc, bb) => {
+            meta.time_signature = [nn, dd, cc, bb];
+        }
+        MetaMessage::KeySignature(sf, mi) => {
+            meta.key_signature = sf;
+            meta.is_minor = mi;
+        }
+        _ => {}
+    }
+}
+
+// MIDI 이벤트를 프로그램 체인지와 note span 정보로 축약한다.
+fn apply_midi_event(
+    channel: u8,
+    message: MidiMessage,
+    current_tick: u64,
+    track: &mut TrackAccumulator,
+) {
+    track.channel.get_or_insert(channel);
+
+    match message {
+        MidiMessage::ProgramChange { program } => {
+            let program = program.as_int();
+            if track.program_changes.is_empty() {
+                // UI 기본값은 첫 프로그램 체인지 기준으로 잡고,
+                // 이후 변경은 program_changes에 시간축 정보로 남긴다.
+                track.program = program;
+            }
+            track.program_changes.push(ProgramChangeEvent {
+                tick: current_tick,
+                program,
+            });
+        }
+        MidiMessage::NoteOn { key, vel } if vel.as_int() > 0 => {
+            // 같은 키가 겹칠 수 있으므로 큐에 쌓아 두고 note off에서 순서대로 닫는다.
+            track
+                .active_notes
+                .entry(key.as_int())
+                .or_default()
+                .push_back(ActiveNote {
+                    start_tick: current_tick,
+                    velocity: vel.as_int(),
+                });
+        }
+        MidiMessage::NoteOn { key, .. } | MidiMessage::NoteOff { key, .. } => {
+            track.close_note(key.as_int(), current_tick);
+        }
+        _ => {}
+    }
+}
+
+// 텍스트 메타 이벤트에서 널 문자와 앞뒤 공백을 제거한다.
+fn sanitize_text(data: &[u8]) -> String {
+    String::from_utf8_lossy(data)
+        .replace('\0', "")
+        .trim()
+        .to_string()
+}
+
+// tempo map을 tick 기준 오름차순으로 정렬하고 같은 tick의 중복은 마지막 값으로 압축한다.
+fn normalize_tempo_changes(mut tempo_changes: Vec<TempoChange>) -> Vec<TempoChange> {
+    tempo_changes.sort_by_key(|tempo_change| tempo_change.tick);
+
+    let mut normalized: Vec<TempoChange> = Vec::with_capacity(tempo_changes.len());
+    for tempo_change in tempo_changes {
+        if let Some(previous) = normalized.last_mut()
+            && previous.tick == tempo_change.tick
+        {
+            previous.micros_per_quarter = tempo_change.micros_per_quarter;
+            continue;
+        }
+        normalized.push(tempo_change);
+    }
+
+    if normalized.is_empty() || normalized[0].tick != 0 {
+        normalized.insert(
+            0,
+            TempoChange {
+                tick: 0,
+                micros_per_quarter: 500_000,
+            },
+        );
+    }
+
+    normalized
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use midly::{
+        num::{u15, u24, u28, u4, u7},
+        Format, Header, MetaMessage, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind,
+    };
+
+    use super::MidiManager;
+
+    #[test]
+    fn parses_zero_velocity_note_on_as_note_off() {
+        let song = MidiManager::parse_bytes(&write_smf(Smf {
+            header: Header::new(Format::SingleTrack, Timing::Metrical(u15::from(480))),
+            tracks: vec![vec![
+                TrackEvent {
+                    delta: u28::from(0),
+                    kind: TrackEventKind::Midi {
+                        channel: u4::from(0),
+                        message: MidiMessage::NoteOn {
+                            key: u7::from(60),
+                            vel: u7::from(100),
+                        },
+                    },
+                },
+                TrackEvent {
+                    delta: u28::from(480),
+                    kind: TrackEventKind::Midi {
+                        channel: u4::from(0),
+                        message: MidiMessage::NoteOn {
+                            key: u7::from(60),
+                            vel: u7::from(0),
+                        },
+                    },
+                },
+            ]],
+        }))
+        .unwrap();
+
+        assert_eq!(song.tracks.len(), 1);
+        assert_eq!(song.tracks[0].note_spans.len(), 1);
+        assert_eq!(song.tracks[0].note_spans[0].start_tick, 0);
+        assert_eq!(song.tracks[0].note_spans[0].end_tick, 480);
+    }
+
+    #[test]
+    fn keeps_multiple_tracks_on_same_channel_distinct() {
+        let song = MidiManager::parse_bytes(&write_smf(Smf {
+            header: Header::new(Format::Parallel, Timing::Metrical(u15::from(480))),
+            tracks: vec![
+                vec![
+                    TrackEvent {
+                        delta: u28::from(0),
+                        kind: TrackEventKind::Meta(MetaMessage::TrackName(b"Track A")),
+                    },
+                    TrackEvent {
+                        delta: u28::from(0),
+                        kind: TrackEventKind::Midi {
+                            channel: u4::from(0),
+                            message: MidiMessage::NoteOn {
+                                key: u7::from(60),
+                                vel: u7::from(100),
+                            },
+                        },
+                    },
+                    TrackEvent {
+                        delta: u28::from(240),
+                        kind: TrackEventKind::Midi {
+                            channel: u4::from(0),
+                            message: MidiMessage::NoteOff {
+                                key: u7::from(60),
+                                vel: u7::from(0),
+                            },
+                        },
+                    },
+                ],
+                vec![
+                    TrackEvent {
+                        delta: u28::from(0),
+                        kind: TrackEventKind::Meta(MetaMessage::TrackName(b"Track B")),
+                    },
+                    TrackEvent {
+                        delta: u28::from(0),
+                        kind: TrackEventKind::Midi {
+                            channel: u4::from(0),
+                            message: MidiMessage::NoteOn {
+                                key: u7::from(64),
+                                vel: u7::from(96),
+                            },
+                        },
+                    },
+                    TrackEvent {
+                        delta: u28::from(240),
+                        kind: TrackEventKind::Midi {
+                            channel: u4::from(0),
+                            message: MidiMessage::NoteOff {
+                                key: u7::from(64),
+                                vel: u7::from(0),
+                            },
+                        },
+                    },
+                ],
+            ],
+        }))
+        .unwrap();
+
+        assert_eq!(song.tracks.len(), 2);
+        assert_eq!(song.tracks[0].name, "Track A");
+        assert_eq!(song.tracks[1].name, "Track B");
+        assert_eq!(song.tracks[0].channel, 0);
+        assert_eq!(song.tracks[1].channel, 0);
+    }
+
+    #[test]
+    fn sorts_tempo_changes_before_converting_song_length() {
+        let song = MidiManager::parse_bytes(&write_smf(Smf {
+            header: Header::new(Format::Parallel, Timing::Metrical(u15::from(480))),
+            tracks: vec![
+                vec![TrackEvent {
+                    delta: u28::from(480),
+                    kind: TrackEventKind::Meta(MetaMessage::Tempo(u24::from(1_000_000))),
+                }],
+                vec![TrackEvent {
+                    delta: u28::from(240),
+                    kind: TrackEventKind::Midi {
+                        channel: u4::from(0),
+                        message: MidiMessage::NoteOn {
+                            key: u7::from(60),
+                            vel: u7::from(100),
+                        },
+                    },
+                }],
+            ],
+        }))
+        .unwrap();
+
+        assert_eq!(song.tempo_changes[0].tick, 0);
+        assert_eq!(song.tempo_changes[1].tick, 480);
+        assert!((song.total_seconds - 0.5).abs() < f64::EPSILON);
+    }
+
+    fn write_smf(smf: Smf<'static>) -> Vec<u8> {
+        let mut out = Cursor::new(Vec::new());
+        smf.write_std(&mut out).unwrap();
+        out.into_inner()
     }
 }

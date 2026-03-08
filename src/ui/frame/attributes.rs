@@ -1,25 +1,7 @@
-use crate::ui::{MidiApp, frame::Frame};
+use crate::ui::{frame::Frame, MidiApp};
 
-// 선택된 노트/이벤트 속성 예시
-// +-----------------------------+
-// | Attributes                  |
-// +-----------------------------+
-// | Pitch: 60 (C4)              |
-// | Velocity: 100               |
-// | Duration: 480 ticks         |
-// | Start Time: 960 ticks       |
-// |             ...             |
-// +-----------------------------+
-
-pub struct Attributes {
-}
-
-impl Default for Attributes {
-    fn default() -> Self {
-        Self {
-        }
-    }
-}
+#[derive(Default)]
+pub struct Attributes;
 
 impl Frame for Attributes {
     const FRAME_NAME: &str = "Attributes";
@@ -28,61 +10,62 @@ impl Frame for Attributes {
     const HEIGHT: f32 = 0.0;
     const RESIZABLE: bool = false;
 
-    fn draw(&mut self, ui: &mut egui::Ui, _app: &mut MidiApp) {
+    // 현재 선택된 트랙의 요약 정보를 읽기 전용으로 보여 준다.
+    fn draw(&mut self, ui: &mut egui::Ui, app: &mut MidiApp) {
         self.header(ui);
 
-        ui.scope_builder(egui::UiBuilder::new(), |ui| {
-            egui::Grid::new(Attributes::FRAME_NAME)
-                .num_columns(2)
-                .spacing([20.0, 4.0])
-                .striped(true)
-                .show(ui, |ui| {
-                    ui.add_sized([80.0, 22.0], egui::Label::new("Name"));
-                    ui.add_sized([110.0, 22.0], egui::Label::new("Value"));
-                    ui.end_row();
+        let midi_manager = app.midi_manager.lock().unwrap();
+        let Some(song) = midi_manager.song() else {
+            ui.label("No track selected.");
+            return;
+        };
 
-                    let mut pitch = format!("{}", 60);
-                    ui.add(egui::Label::new("Pitch"));
-                    let edit_box = egui::TextEdit::singleline(&mut pitch)
-                        .desired_width(40.0);
-                    if ui.add(edit_box).changed() {
-                        // pitch;
-                    }
-                    ui.end_row();
+        let Some(selected_track_index) = app.select_track else {
+            ui.label("Select a track to inspect.");
+            return;
+        };
 
-                    ui.add(egui::Label::new("Velocity"));
-                    let mut velocity = format!("{}", 100);
-                    let edit_box = egui::TextEdit::singleline(&mut velocity)
-                        .desired_width(40.0);
-                    if ui.add(edit_box).changed() {
-                        // velocity;
-                    }
-                    ui.end_row();
+        let Some(track) = song
+            .tracks
+            .iter()
+            .find(|track| track.track_index == selected_track_index)
+        else {
+            ui.label("Selected track is no longer available.");
+            return;
+        };
 
-                    ui.add(egui::Label::new("Duration"));
-                    let mut duration = format!("{}", 480);
-                    ui.horizontal(|ui| {
-                        let edit_box = egui::TextEdit::singleline(&mut duration)
-                            .desired_width(40.0);
-                        if ui.add(edit_box).changed() {
-                            // duration;
-                        }
-                        ui.label("ticks");
-                    });
-                    ui.end_row();
+        egui::Grid::new(Attributes::FRAME_NAME)
+            .num_columns(2)
+            .spacing([20.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label("Name");
+                ui.label(track.display_name());
+                ui.end_row();
 
-                    ui.add(egui::Label::new("Start Time"));
-                    let mut start_time = format!("{}", 960);
-                    ui.horizontal(|ui| {
-                        let edit_box = egui::TextEdit::singleline(&mut start_time)
-                            .desired_width(40.0);
-                        if ui.add(edit_box).changed() {
-                            // start_time;
-                        }
-                        ui.label("ticks");
-                    });
-                    ui.end_row();
-                });
-        });
+                ui.label("Channel");
+                ui.label(format!("{:02}", track.channel + 1));
+                ui.end_row();
+
+                ui.label("Program");
+                ui.label(format!("{}", track.program));
+                ui.end_row();
+
+                ui.label("Notes");
+                ui.label(format!("{}", track.note_spans.len()));
+                ui.end_row();
+
+                ui.label("Range");
+                let range = track
+                    .note_spans
+                    .iter()
+                    .map(|note| note.key)
+                    .min()
+                    .zip(track.note_spans.iter().map(|note| note.key).max())
+                    .map(|(min, max)| format!("{min}..{max}"))
+                    .unwrap_or_else(|| "-".to_string());
+                ui.label(range);
+                ui.end_row();
+            });
     }
 }

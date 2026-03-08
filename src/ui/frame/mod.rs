@@ -21,6 +21,7 @@ pub trait Frame {
     fn draw(&mut self, ui: &mut egui::Ui, app: &mut MidiApp);
 
     fn header(&self, ui: &mut egui::Ui) {
+        // 공통 프레임 헤더를 그려 각 패널의 제목 스타일을 통일한다.
         egui::Frame::new()
             .inner_margin(Margin { top: 4, left: 6, right: 6, bottom: 4 })
             .fill(Color32::from_rgb(32, 32, 32))

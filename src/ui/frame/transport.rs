@@ -1,24 +1,9 @@
-use egui::{
-    Color32, Margin, Slider, SliderOrientation
-};
+use egui::{Color32, Margin, Slider, SliderOrientation};
 
-use crate::ui::{MidiApp, frame::Frame};
+use crate::ui::{frame::Frame, MidiApp};
 
-// 트랜스포트 (MIDI 재생 제어) 예시
-// +-------------------------------------------------------------+
-// | midi_file.mid                                               |
-// | [⏮] [⏸] [⏹] [🔁]   ------O---------                        |
-// +-------------------------------------------------------------+
-
-pub struct Transport {
-}
-
-impl Default for Transport {
-    fn default() -> Self {
-        Self {
-        }
-    }
-}
+#[derive(Default)]
+pub struct Transport;
 
 impl Frame for Transport {
     const FRAME_NAME: &str = "Transport";
@@ -27,8 +12,38 @@ impl Frame for Transport {
     const HEIGHT: f32 = 52.0;
     const RESIZABLE: bool = false;
 
+    // 재생 제어 버튼과 탐색 슬라이더를 그리고 SharedAudioState를 직접 갱신한다.
     fn draw(&mut self, ui: &mut egui::Ui, app: &mut MidiApp) {
+        let midi_manager = app.midi_manager.lock().unwrap();
+        let is_loading = midi_manager.is_loading();
+        let song = midi_manager.song();
+        let title = if is_loading {
+            "Loading MIDI file...".to_string()
+        } else if let Some(song) = song {
+            song.display_title()
+                .map(str::to_string)
+                .unwrap_or_else(|| app.open_file_name.clone())
+        } else {
+            "Select a MIDI file to play.".to_string()
+        };
+        drop(midi_manager);
+
+        let (is_playing, repeat_enabled, playback_cursor_samples, song_length_samples) = {
+            let shared_state = app.shared_state.lock().unwrap();
+            (
+                shared_state.is_playing,
+                shared_state.repeat_enabled,
+                shared_state.playback_cursor_samples,
+                shared_state.song_length_samples,
+            )
+        };
         let is_file_open = !app.open_file_name.is_empty();
+        // 슬라이더는 항상 0..1000 범위로 유지하고 실제 샘플 위치로만 환산한다.
+        let slider_value = if song_length_samples == 0 {
+            0
+        } else {
+            ((playback_cursor_samples as f64 / song_length_samples as f64) * 1000.0) as i32
+        };
 
         egui::Frame::new()
             .inner_margin(Margin::same(2))
@@ -38,78 +53,73 @@ impl Frame for Transport {
                     ui.vertical(|ui| {
                         ui.set_min_width(ui.available_width());
 
-                        let title = if !is_file_open {
-                            // 파일이 열려있지 않을 때 MIDI 파일을 선택해달라는 메시지 표시
-                            "Select a MIDI file to play.".to_string()
-                        } else {
-                            // 파일이 열려있을 때 파일 이름 표시
-                            let program_name = app.midi_manager.lock().unwrap().meta.program_name.clone();
-                            if program_name.is_empty() { app.open_file_name.clone() } else { program_name }
-                        };
-                        let title_label = egui::Label::new(title)
-                            .wrap_mode(egui::TextWrapMode::Truncate);
+                        let title_label =
+                            egui::Label::new(title).wrap_mode(egui::TextWrapMode::Truncate);
                         ui.add_sized([ui.available_width(), 22.0], title_label);
 
-                        // 컨트롤러 버튼
                         ui.horizontal_centered(|ui| {
                             ui.set_min_width(ui.available_width());
 
-                            // 파일 열기/닫기
-                            let is_empty_file = app.open_file_name.is_empty();
-                            let open_btn = egui::Button::new(if is_empty_file { "Open" } else { "Close" });
-                            let open_btn_ui = ui.add(open_btn);
-                            if open_btn_ui.clicked() {
-                                if is_empty_file {
-                                    app.open_file();
-                                } else {
+                            let open_text = if is_loading {
+                                "Loading..."
+                            } else if is_file_open {
+                                "Close"
+                            } else {
+                                "Open"
+                            };
+                            let open_btn = egui::Button::new(open_text);
+                            if ui.add_enabled(!is_loading, open_btn).clicked() {
+                                if is_file_open {
                                     app.close();
+                                } else {
+                                    app.open_file();
                                 }
                             }
 
-                            // 처음으로
                             let rewind_btn = egui::Button::new("⏮");
-                            let is_not_begin = is_file_open && app.shared_state.lock().unwrap().playback_cursor != 0;
-                            let rewind_btn_ui = ui.add_enabled(is_not_begin, rewind_btn)
-                                .on_hover_text("Rewind");
-                            if rewind_btn_ui.clicked() {
-                                app.shared_state.lock().unwrap().playback_cursor = 0;
+                            let can_rewind = is_file_open && playback_cursor_samples != 0;
+                            if ui
+                                .add_enabled(can_rewind, rewind_btn)
+                                .on_hover_text("Rewind")
+                                .clicked()
+                            {
+                                app.shared_state.lock().unwrap().seek_samples(0);
                             }
 
-                            // 재생/일시정지
-                            let is_playing = is_file_open && app.shared_state.lock().unwrap().is_playing;
                             let play_pause_text = if is_playing { "⏸" } else { "▶" };
                             let play_pause_btn = egui::Button::new(play_pause_text);
-                            let play_pause_btn_ui = ui.add_enabled(is_file_open, play_pause_btn)
-                                .on_hover_text("Play/Pause");
-                            if play_pause_btn_ui.clicked() {
-                                let is_playing = !app.shared_state.lock().unwrap().is_playing;
-                                app.shared_state.lock().unwrap().is_playing = is_playing;
-                                if is_playing { app.play(); }
+                            if ui
+                                .add_enabled(is_file_open && !is_loading, play_pause_btn)
+                                .on_hover_text("Play/Pause")
+                                .clicked()
+                            {
+                                if is_playing {
+                                    app.shared_state.lock().unwrap().set_playing(false);
+                                } else {
+                                    app.play();
+                                }
                             }
 
-                            // 정지
                             let stop_btn = egui::Button::new("⏹");
-                            let stop_btn_ui = ui.add_enabled(is_playing, stop_btn)
-                                .on_hover_text("Stop");
-                            if stop_btn_ui.clicked() {
-                                app.shared_state.lock().unwrap().is_playing = false;
-                                app.shared_state.lock().unwrap().playback_cursor = 0;
+                            if ui
+                                .add_enabled(is_playing, stop_btn)
+                                .on_hover_text("Stop")
+                                .clicked()
+                            {
+                                app.stop();
                             }
 
-                            // 반복
-                            let repeat_text = if app.shared_state.lock().unwrap().is_repeat { "🔁" } else { "❶" };
-                            let repeat_btn = egui::Button::new(repeat_text);
-                            let repeat_btn_ui = ui.add_enabled(is_file_open, repeat_btn)
-                                .on_hover_text("Once/Repeat");
-                            if repeat_btn_ui.clicked() {
-                                app.shared_state.lock().unwrap().is_repeat = !app.shared_state.lock().unwrap().is_repeat;
+                            let repeat_btn = egui::Button::new(if repeat_enabled { "🔁" } else { "❶" });
+                            if ui
+                                .add_enabled(is_file_open, repeat_btn)
+                                .on_hover_text("Once/Repeat")
+                                .clicked()
+                            {
+                                let enabled = !repeat_enabled;
+                                app.shared_state.lock().unwrap().set_repeat_enabled(enabled);
                             }
 
-                            // 재생 슬라이더
-                            let sample_rate = app.audio.sample_rate as f64;
-                            let current_seconds = app.shared_state.lock().unwrap().playback_cursor as f64 / sample_rate;
-                            let total_seconds = app.midi_manager.lock().unwrap().total_seconds;
-                            let mut value = (current_seconds / total_seconds * 1000.0) as i32;
+                            let mut value = slider_value;
                             let control_slider = Slider::new(&mut value, 0..=1000)
                                 .orientation(SliderOrientation::Horizontal)
                                 .handle_shape(egui::style::HandleShape::Circle)
@@ -117,11 +127,12 @@ impl Frame for Transport {
                                 .trailing_fill(true)
                                 .show_value(false);
                             ui.spacing_mut().slider_width = 200.0;
-                            let control_slider_ui = ui.add_enabled(is_file_open, control_slider);
-                            if control_slider_ui.drag_stopped() {
-                                let playback_cursor = (value as f64 / 1000.0 * total_seconds) as usize;
-                                app.shared_state.lock().unwrap().playback_cursor = playback_cursor;
-                                println!("playback_cursor: {}, value: {}", playback_cursor, value);
+                            let response = ui.add_enabled(is_file_open, control_slider);
+                            if response.drag_stopped() && song_length_samples > 0 {
+                                let sample_index = ((value as f64 / 1000.0)
+                                    * song_length_samples as f64)
+                                    .round() as usize;
+                                app.shared_state.lock().unwrap().seek_samples(sample_index);
                             }
                         });
                     });

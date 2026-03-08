@@ -1,42 +1,32 @@
-use egui::{
-    Color32,
-    Pos2,
-    Stroke,
-};
+use egui::{Color32, Pos2, Stroke};
 
-use crate::ui::{MidiApp, frame::Frame};
+use crate::ui::{frame::Frame, MidiApp};
 
-// 피아노 롤 / 그리드 예시
-// +-----+-------+-------+-------+-------+-------+-------+-------+
-// | G9  |       | [===] |[===]  |       |       |       |       |
-// | F#9 |       |       |       |       |       |       |       |
-// | F9  |       |       |     [===========]     |       |       |
-// | E9  |       |    [=====]    |       |   [==]|       |       |
-// | D#9 |       |       |       |       |       |       |       |
-// |                              ...                            |
-// | D3  |       |       |       | [===] |       |       |       |
-// +-----+-------+-------+-------+-------+-------+-------+-------+
-
-const NOTE_NAMES: &[&'static str] = &[
-    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+const NOTE_NAMES: &[&str] = &[
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
 ];
 
-const CHANNEL_COLORS: &[Color32] = &[
+const CHANNEL_COLORS: [Color32; 16] = [
     Color32::from_rgb(197, 131, 56),
     Color32::from_rgb(19, 178, 210),
     Color32::from_rgb(232, 198, 29),
     Color32::from_rgb(198, 200, 54),
+    Color32::from_rgb(208, 96, 145),
+    Color32::from_rgb(71, 165, 114),
+    Color32::from_rgb(229, 108, 77),
+    Color32::from_rgb(99, 128, 222),
+    Color32::from_rgb(209, 154, 102),
+    Color32::from_rgb(134, 167, 60),
+    Color32::from_rgb(61, 185, 154),
+    Color32::from_rgb(211, 102, 123),
+    Color32::from_rgb(162, 121, 255),
+    Color32::from_rgb(94, 201, 255),
+    Color32::from_rgb(255, 170, 70),
+    Color32::from_rgb(140, 140, 140),
 ];
 
-pub struct NoteGrid {
-}
-
-impl Default for NoteGrid {
-    fn default() -> Self {
-        Self {
-        }
-    }
-}
+#[derive(Default)]
+pub struct NoteGrid;
 
 impl Frame for NoteGrid {
     const FRAME_NAME: &str = "NoteGrid";
@@ -45,32 +35,34 @@ impl Frame for NoteGrid {
     const HEIGHT: f32 = 0.0;
     const RESIZABLE: bool = true;
 
+    // note span과 현재 재생 커서를 이용해 피아노 롤과 타임라인을 그린다.
     fn draw(&mut self, ui: &mut egui::Ui, app: &mut MidiApp) {
         let rect = ui.response().rect;
-        let label_width = 35.0; // 음 이름 표시 너비 값
-        let beats_width = 50.0; // 1박자당 너비 값
+        let label_width = 35.0;
+        let beats_width = 50.0;
         let row_height = 12.0;
         let beats_height = 20.0;
-        let max_height = 128.0 * row_height + beats_height; // 128음역 * 음 높이(12픽셀)
-        let tick_width = {
-            let midi_manager = &app.midi_manager.lock().unwrap();
-            beats_width / midi_manager.ppq as f32 // 1틱장 너비 값
-        };
-        let beats_per_second = {
-            let midi_manager = &app.midi_manager.lock().unwrap();
-            1_000_000f64 / midi_manager.meta.tempo
-        };
-        // let ticks_per_second = {
-        //     let midi_manager = &app.midi_manager.lock().unwrap();
-        //     beats_per_second * midi_manager.ppq
-        // };
-        let max_width = {
-            let midi_manager = &app.midi_manager.lock().unwrap();
-            let width = label_width + (midi_manager.total_seconds * beats_per_second) as f32 * beats_width + beats_width;
-            if width > ui.available_width() { width } else { ui.available_width() }
+        let max_height = 128.0 * row_height + beats_height;
+
+        let midi_manager = app.midi_manager.lock().unwrap();
+        let Some(song) = midi_manager.song() else {
+            ui.centered_and_justified(|ui| {
+                ui.label("Open a MIDI file to see the piano roll.");
+            });
+            return;
         };
 
-        // 노트 그리드 영역
+        // 그리드는 tempo 변화와 무관하게 tick/beat 축으로 그려야 편집 좌표가 안정적이다.
+        let tick_width = if song.ppq == 0 {
+            0.0
+        } else {
+            beats_width / song.ppq as f32
+        };
+        let max_width = label_width
+            + song.beats_for_ticks(song.total_ticks) * beats_width
+            + beats_width;
+        let max_width = max_width.max(ui.available_width());
+
         egui::ScrollArea::both()
             .max_height(max_height)
             .hscroll(true)
@@ -82,13 +74,11 @@ impl Frame for NoteGrid {
                 let painter = ui.painter().with_clip_rect(ui.clip_rect());
                 let font_id = egui::FontId::new(10.0, egui::FontFamily::default());
 
-                // 기준 좌표 계산
                 let start_x = response.min.x;
                 let start_y = response.min.y;
                 let grid_start_x = start_x + label_width;
                 let grid_start_y = start_y + beats_height;
                 let width = response.max.x;
-                // let height = response.max.y;
 
                 for i in 0..=127 {
                     let note = 127 - i;
@@ -97,54 +87,34 @@ impl Frame for NoteGrid {
                         _ => Color32::LIGHT_GRAY,
                     };
                     let y = grid_start_y + (i * 12) as f32;
-
-                    // 노트 영역 배경색
-                    let start_point = Pos2::new(grid_start_x, y + 6.0);
-                    let end_point = Pos2::new(width, y + 6.0);
                     painter.line_segment(
-                        [start_point, end_point],
+                        [Pos2::new(grid_start_x, y + 6.0), Pos2::new(width, y + 6.0)],
                         Stroke::new(11.0, color),
                     );
                 }
 
-                // 키 노트 그리기
-                for (channel, midi) in &app.midi_manager.lock().unwrap().midi {
-                    for (key, data_list) in midi {
-                        let mut start = 0u64;
-                        let mut end = 0u64;
-                        for data in data_list {
-                            if data.is_on {
-                                if start == 0u64 {
-                                    start = data.tick;
-                                } else if data.velocity == 0u8 {
-                                    end = data.tick;
-                                }
-                            } else {
-                                end = data.tick;
-                            }
-
-                            if end != 0u64 {
-                                let x = grid_start_x + start as f32 * tick_width;
-                                let end_x = grid_start_x + end as f32 * tick_width;
-                                let y = grid_start_y + (127 - *key) as f32 * row_height;
-                                start = 0;
-                                end = 0;
-                                painter.rect(
-                                    egui::Rect::from_points(&[
-                                        Pos2::new(x, y + 1.0),
-                                        Pos2::new(end_x, y + row_height)
-                                    ]),
-                                    1.5,
-                                    CHANNEL_COLORS[*channel as usize],
-                                    Stroke::new(1.0, Color32::WHITE),
-                                    egui::StrokeKind::Inside,
-                                );
-                            }
-                        }
+                for track in song.tracks.iter().filter(|track| match app.solo_track {
+                    Some(track_index) => track.track_index == track_index && !track.is_muted,
+                    None => !track.is_muted,
+                }) {
+                    let color = CHANNEL_COLORS[track.channel as usize % CHANNEL_COLORS.len()];
+                    for note in &track.note_spans {
+                        let x = grid_start_x + note.start_tick as f32 * tick_width;
+                        let end_x = grid_start_x + note.end_tick as f32 * tick_width;
+                        let y = grid_start_y + (127 - note.key) as f32 * row_height;
+                        painter.rect(
+                            egui::Rect::from_points(&[
+                                Pos2::new(x, y + 1.0),
+                                Pos2::new(end_x.max(x + 1.0), y + row_height),
+                            ]),
+                            1.5,
+                            color,
+                            Stroke::new(1.0, Color32::WHITE),
+                            egui::StrokeKind::Inside,
+                        );
                     }
                 }
 
-                // 음 이름 표시
                 for i in 0..=127 {
                     let note = 127 - i;
                     let color = match note % 12 {
@@ -152,18 +122,15 @@ impl Frame for NoteGrid {
                         _ => Color32::LIGHT_GRAY,
                     };
                     let y = grid_start_y + (i * 12) as f32;
-
-                    // 음 이름 표시 영역 배경색
-                    let rgb = color.r() - 50;
+                    let rgb = color.r().saturating_sub(50);
                     painter.rect_filled(
                         egui::Rect::from_points(&[
                             Pos2::new(rect.min.x, y + 1.0),
-                            Pos2::new(rect.min.x + label_width - 1.0, y + row_height)
+                            Pos2::new(rect.min.x + label_width - 1.0, y + row_height),
                         ]),
-                        0.0, Color32::from_rgb(rgb, rgb, rgb),
+                        0.0,
+                        Color32::from_rgb(rgb, rgb, rgb),
                     );
-
-                    // 음 이름 텍스트 표시
                     painter.text(
                         Pos2::new(rect.min.x + 3.0, y),
                         egui::Align2::LEFT_TOP,
@@ -173,7 +140,6 @@ impl Frame for NoteGrid {
                     );
                 }
 
-                // 타임라인 영역
                 painter.rect(
                     egui::Rect::from_two_pos(
                         Pos2::new(rect.min.x, rect.min.y),
@@ -185,34 +151,31 @@ impl Frame for NoteGrid {
                     egui::StrokeKind::Outside,
                 );
 
-                // 박자 구분을 위한 가이드 라인
-                for i in 0..=(max_width/beats_width) as usize {
+                for i in 0..=(max_width / beats_width) as usize {
                     let x = grid_start_x + i as f32 * beats_width;
-                    // 화면 표시 영역을 벗어날 경우 그리지 않음
-                    if x < rect.min.x + label_width || x > rect.max.x { continue };
+                    if x < rect.min.x + label_width || x > rect.max.x {
+                        continue;
+                    }
+
                     if i > 0 {
-                        // 1박자 선
-                        let start_point = Pos2::new(x, rect.min.y);
-                        let end_point = Pos2::new(x, rect.max.y);
                         painter.line_segment(
-                            [start_point, end_point],
+                            [Pos2::new(x, rect.min.y), Pos2::new(x, rect.max.y)],
                             Stroke::new(1.0, Color32::DARK_GRAY),
                         );
                     }
 
-                    // 1박자를 10분할한 선
                     for j in 1..8 {
                         let pos_x = x + j as f32 * beats_width / 8.0;
                         let line_height = if j % 2 == 1 { 1.5 } else { 2.2 };
-                        let start_point = Pos2::new(pos_x, rect.min.y + beats_height / line_height);
-                        let end_point = Pos2::new(pos_x, rect.min.y + beats_height);
                         painter.line_segment(
-                            [start_point, end_point],
+                            [
+                                Pos2::new(pos_x, rect.min.y + beats_height / line_height),
+                                Pos2::new(pos_x, rect.min.y + beats_height),
+                            ],
                             Stroke::new(1.0, Color32::DARK_GRAY),
                         );
                     }
 
-                    // 박자 텍스트 표시
                     painter.text(
                         Pos2::new(x + 1.0, rect.min.y),
                         egui::Align2::LEFT_TOP,
@@ -221,27 +184,23 @@ impl Frame for NoteGrid {
                         Color32::WHITE,
                     );
                 }
+
                 painter.line_segment(
                     [
                         Pos2::new(rect.min.x + label_width - 1.0, rect.min.y),
-                        Pos2::new(rect.min.x + label_width - 1.0, rect.max.y)
+                        Pos2::new(rect.min.x + label_width - 1.0, rect.max.y),
                     ],
                     Stroke::new(1.0, Color32::BLACK),
                 );
 
-                // 타임라인 선
-                let timeline_x = {
-                    let sample_rate = app.audio.sample_rate as f64;
-                    let current_seconds = app.shared_state.lock().unwrap().playback_cursor as f64 / sample_rate;
-                    if current_seconds == 0.0 { 0.0 } else {
-                        grid_start_x + (current_seconds * beats_per_second) as f32 * beats_width
-                    }
-                };
+                let current_sample = app.shared_state.lock().unwrap().playback_cursor_samples;
+                let current_tick = song.tick_for_sample(current_sample, app.audio.sample_rate);
+                let timeline_x = grid_start_x + song.beats_for_ticks(current_tick) * beats_width;
                 if timeline_x >= rect.min.x + label_width && timeline_x <= rect.max.x {
                     painter.line_segment(
                         [
                             Pos2::new(timeline_x, rect.min.y),
-                            Pos2::new(timeline_x, rect.max.y)
+                            Pos2::new(timeline_x, rect.max.y),
                         ],
                         Stroke::new(1.0, Color32::from_rgb(62, 46, 211)),
                     );

@@ -1,32 +1,28 @@
-use std::{collections::HashMap, sync::{Arc, Mutex}, thread};
+use std::{
+    sync::{Arc, Mutex},
+    thread,
+};
+
 use eframe::{App, Error, NativeOptions};
 use egui::{
-    Color32, Context, FontData, FontFamily, ViewportBuilder, epaint::text::{FontInsert, FontPriority, InsertFontFamily}
+    epaint::text::{FontInsert, FontPriority, InsertFontFamily},
+    Color32, Context, FontData, FontFamily, ViewportBuilder,
 };
 use rfd::FileDialog;
 
-use crate::{audio::{Audio, midi::MidiManager, midi_struct::MidiNote, state::SharedAudioState}, ui::{
-    frame::{Frame, attributes::Attributes, keyboard::Keyboard, menu::Menu, note_grid::NoteGrid, track_list::TrackList, transport::Transport},
-    message_box::get_message_box,
-}};
+use crate::{
+    audio::{midi::{LoadResult, MidiManager}, state::SharedAudioState, Audio},
+    ui::{
+        frame::{
+            attributes::Attributes, keyboard::Keyboard, menu::Menu, note_grid::NoteGrid,
+            track_list::TrackList, transport::Transport, Frame,
+        },
+        message_box::get_message_box,
+    },
+};
 
 pub mod message_box;
 mod frame;
-
-// 전체 UI 레이아웃 예시
-// +-------------------------------------------------------------+
-// | [1. TOP] Menu                                               |
-// +-------------+---------------------------------+-------------+
-// |             | [5. CENTER - TOP] Transport     |             |
-// |             +---------------------------------+             |
-// | [3. LEFT]   |                                 | [4. RIGHT]  |
-// |  Track List | [6. CENTER - MAIN]              |  Attributes |
-// |             |  Piano Roll / Grid              |             |
-// |             |                                 |             |
-// |-------------+---------------------------------+-------------+
-// | [2. BOTTOM]                                                 |
-// |  Velocity / Controller                                      |
-// +-------------------------------------------------------------+
 
 pub struct MidiApp {
     audio: Audio,
@@ -34,8 +30,8 @@ pub struct MidiApp {
     open_file_name: String,
     start_octave: i8,
     midi_manager: Arc<Mutex<MidiManager>>,
-    select_track: Option<u8>,
-    solo_track: Option<u8>,
+    select_track: Option<usize>,
+    solo_track: Option<usize>,
     show_keyboard: bool,
     show_track_list: bool,
     show_attributes: bool,
@@ -44,8 +40,8 @@ pub struct MidiApp {
 impl MidiApp {
     pub const APP_NAME: &str = "MIDI Editor";
 
+    // 앱 폰트와 오디오 시스템을 초기화하고 egui 네이티브 창을 띄운다.
     pub fn run() -> Result<(), Error> {
-        // UI 실행
         let options = NativeOptions {
             viewport: ViewportBuilder::default().with_inner_size([1280.0, 720.0]),
             centered: true,
@@ -53,125 +49,179 @@ impl MidiApp {
             ..NativeOptions::default()
         };
 
-        eframe::run_native(MidiApp::APP_NAME, options, Box::new(|cc| {
-            // 폰트 설정
-            let nanum_font = include_bytes!("../../assets/NanumGothic.ttf");
-            let font_data = FontData::from_static(nanum_font);
-            let font = FontInsert {
-                name: "Nanum Gothic".to_string(),
-                data: font_data,
-                families: vec![InsertFontFamily {
-                    family: FontFamily::Proportional,
-                    priority: FontPriority::Highest,
-                }],
-            };
-            cc.egui_ctx.add_font(font);
+        eframe::run_native(
+            MidiApp::APP_NAME,
+            options,
+            Box::new(|cc| {
+                let nanum_font = include_bytes!("../../assets/NanumGothic.ttf");
+                let font = FontInsert {
+                    name: "Nanum Gothic".to_string(),
+                    data: FontData::from_static(nanum_font),
+                    families: vec![InsertFontFamily {
+                        family: FontFamily::Proportional,
+                        priority: FontPriority::Highest,
+                    }],
+                };
+                cc.egui_ctx.add_font(font);
 
-            // 오디오 설정
-            let shared_state = Arc::new(Mutex::new(SharedAudioState::new()));
-            let audio = Audio::new(shared_state.clone());
+                let shared_state = Arc::new(Mutex::new(SharedAudioState::default()));
+                let audio = Audio::new(shared_state.clone())
+                    .map_err(|error| -> Box<dyn std::error::Error + Send + Sync> {
+                        Box::new(error)
+                    })?;
 
-            let app = Box::new(MidiApp {
-                audio,
-                shared_state,
-                open_file_name: String::new(),
-                start_octave: -1,
-                midi_manager: Arc::new(Mutex::new(MidiManager::default())),
-                select_track: None,
-                solo_track: None,
-                show_keyboard: true,
-                show_track_list: true,
-                show_attributes: true,
-            });
-
-            Ok(app)
-        }))
+                Ok(Box::new(MidiApp {
+                    audio,
+                    shared_state,
+                    open_file_name: String::new(),
+                    start_octave: -1,
+                    midi_manager: Arc::new(Mutex::new(MidiManager::default())),
+                    select_track: None,
+                    solo_track: None,
+                    show_keyboard: true,
+                    show_track_list: true,
+                    show_attributes: true,
+                }))
+            }),
+        )
     }
 
+    // 백그라운드 로더가 남긴 성공/실패 결과를 메인 스레드 상태에 반영한다.
+    fn process_load_results(&mut self) {
+        let pending_result = self
+            .midi_manager
+            .lock()
+            .unwrap()
+            .take_pending_result();
+
+        match pending_result {
+            Some(LoadResult::Success(loaded_song)) => {
+                self.open_file_name = loaded_song.file_name;
+                self.select_track = None;
+                self.solo_track = None;
+                self.midi_manager
+                    .lock()
+                    .unwrap()
+                    .apply_song(loaded_song.song);
+                self.refresh_playback_data(true);
+                get_message_box()
+                    .lock()
+                    .unwrap()
+                    .show("File loaded successfully.");
+            }
+            Some(LoadResult::Error(error)) => {
+                self.open_file_name.clear();
+                self.shared_state.lock().unwrap().clear_playback();
+                get_message_box().lock().unwrap().error(error);
+            }
+            None => {}
+        }
+    }
+
+    // 현재 Song과 솔로/뮤트 상태를 기준으로 재생 타임라인을 다시 만든다.
+    fn refresh_playback_data(&mut self, reset_cursor: bool) {
+        let playback_data = self
+            .midi_manager
+            .lock()
+            .unwrap()
+            .song()
+            .map(|song| song.playback_data(self.audio.sample_rate, self.solo_track));
+
+        if let Some(playback_data) = playback_data {
+            self.shared_state
+                .lock()
+                .unwrap()
+                .set_playback_data(playback_data, reset_cursor);
+        } else {
+            self.shared_state.lock().unwrap().clear_playback();
+        }
+    }
+
+    // 파일 선택 대화상자를 열고 실제 파싱은 백그라운드 스레드에서 수행한다.
     fn open_file(&mut self) {
-        // 파일 열기
-        let path_buf_opt = FileDialog::default().add_filter("MIDI Files", &["mid", "midi"]).pick_file();
-        if path_buf_opt.is_none() {
-            get_message_box().lock().unwrap().error("No file selected.");
+        if self.midi_manager.lock().unwrap().is_loading() {
             return;
         }
-        let path = path_buf_opt.unwrap();
-        let file_path = path.as_os_str().to_str().unwrap().to_string();
-        let file_name = path.file_name().unwrap().to_str().unwrap();
 
-        self.open_file_name = String::from(file_name);
-        println!("file: {}", file_name);
-        
-        let midi_manager_arc = Arc::clone(&self.midi_manager);
+        let Some(path) = FileDialog::default()
+            .add_filter("MIDI Files", &["mid", "midi"])
+            .pick_file()
+        else {
+            get_message_box().lock().unwrap().error("No file selected.");
+            return;
+        };
+
+        let file_name = path
+            .file_name()
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Untitled.mid".to_string());
+
+        self.midi_manager.lock().unwrap().begin_loading();
+
+        let midi_manager = Arc::clone(&self.midi_manager);
         thread::spawn(move || {
-            let mut midi_manager = midi_manager_arc.lock().unwrap();
-            midi_manager.open(&file_path);
-            get_message_box().lock().unwrap().show("File loaded successfully.");
+            let result = MidiManager::load_file(path.as_path());
+            let mut midi_manager = midi_manager.lock().unwrap();
+            match result {
+                Ok(song) => midi_manager.finish_loading(file_name, song),
+                Err(error) => midi_manager.finish_loading_error(error.to_string()),
+            }
         });
     }
 
+    // 현재 열린 곡과 재생 상태를 모두 닫는다.
     fn close(&mut self) {
         self.midi_manager.lock().unwrap().close();
-        self.shared_state.lock().unwrap().is_playing = false;
-        self.shared_state.lock().unwrap().playback_cursor = 0;
+        self.shared_state.lock().unwrap().clear_playback();
         self.open_file_name.clear();
+        self.select_track = None;
+        self.solo_track = None;
     }
 
+    // 재생 직전에 최신 트랙 설정으로 타임라인을 갱신한 뒤 재생을 시작한다.
     fn play(&mut self) {
-        let mut notes = Vec::new();
-        let midi_manager = self.midi_manager.lock().unwrap();
-        let sample_per_tick = (&midi_manager.meta.tempo * self.audio.sample_rate as f64) / (1_000_000f64 * &midi_manager.ppq);
-        for (channel, midi) in &midi_manager.midi {
-            let track = midi_manager.tracks.get(channel).unwrap();
-            if !self.solo_track.is_none() && self.solo_track != Some(*channel) || track.is_muted { continue };
-            for (key, data_list) in midi {
-                for midi in data_list {
-                    notes.push(MidiNote {
-                        start_sample: (midi.tick * sample_per_tick as u64) as usize,
-                        channel: *channel as i32,
-                        key: *key as i32,
-                        velocity: midi.velocity as i32,
-                    });
-                }
-            }
-        }
-
-        let mut instruments = HashMap::new();
-        for (channel, track) in &midi_manager.tracks {
-            if !self.solo_track.is_none() && self.solo_track != Some(*channel) || track.is_muted { continue; }
-            instruments.insert(*channel, track.instrument as i32);
-        }
-
+        self.refresh_playback_data(false);
         let mut shared_state = self.shared_state.lock().unwrap();
-        shared_state.notes = notes;
-        shared_state.instruments = instruments;
+        if shared_state.playback_cursor_samples >= shared_state.song_length_samples {
+            shared_state.seek_samples(0);
+        }
+        shared_state.set_playing(true);
+    }
+
+    // 정지 시에는 재생을 끊고 커서를 처음으로 되돌린다.
+    fn stop(&mut self) {
+        let mut shared_state = self.shared_state.lock().unwrap();
+        shared_state.set_playing(false);
+        shared_state.seek_samples(0);
     }
 }
 
 impl App for MidiApp {
+    // 매 프레임마다 로드 결과를 처리하고 각 패널을 최신 상태로 다시 그린다.
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // 아래 순서대로 패널을 그리지 않으면 위치가 의도와 달라지니 주의
+        self.process_load_results();
+
         ctx.style_mut(|style| {
             style.interaction.selectable_labels = false;
         });
+
         let fill = Color32::from_rgb(0, 0, 0);
         let is_playing = self.shared_state.lock().unwrap().is_playing;
-    
-        let mut menu = Menu::default();
-        let mut keyboard = Keyboard::default();
-        let mut track_list = TrackList::default();
-        let mut attributes = Attributes::default();
-        let mut transport = Transport::default();
-        let mut note_grid = NoteGrid::default();
+        let is_loading = self.midi_manager.lock().unwrap().is_loading();
 
-        // TOP : 메뉴 바
+        let mut menu = Menu;
+        let mut keyboard = Keyboard;
+        let mut track_list = TrackList;
+        let mut attributes = Attributes;
+        let mut transport = Transport;
+        let mut note_grid = NoteGrid;
+
         egui::TopBottomPanel::top(Menu::FRAME_NAME)
             .frame(egui::Frame::new().inner_margin(Menu::INNER_MARGIN).fill(fill))
             .exact_height(Menu::HEIGHT)
             .resizable(Menu::RESIZABLE)
             .show(ctx, |ui| menu.draw(ui, self));
 
-        // BOTTOM : 키보드 건반
         if self.show_keyboard {
             egui::TopBottomPanel::bottom(Keyboard::FRAME_NAME)
                 .frame(egui::Frame::new().inner_margin(Keyboard::INNER_MARGIN).fill(fill))
@@ -180,7 +230,6 @@ impl App for MidiApp {
                 .show(ctx, |ui| keyboard.draw(ui, self));
         }
 
-        // LEFT : 트랙 리스트
         if self.show_track_list {
             egui::SidePanel::left(TrackList::FRAME_NAME)
                 .frame(egui::Frame::new().inner_margin(TrackList::INNER_MARGIN).fill(fill))
@@ -189,7 +238,6 @@ impl App for MidiApp {
                 .show(ctx, |ui| track_list.draw(ui, self));
         }
 
-        // RIGHT : 선택된 노트/이벤트 속성 예시
         if self.show_attributes {
             egui::SidePanel::right(Attributes::FRAME_NAME)
                 .frame(egui::Frame::new().inner_margin(Attributes::INNER_MARGIN).fill(fill))
@@ -198,24 +246,22 @@ impl App for MidiApp {
                 .show(ctx, |ui| attributes.draw(ui, self));
         }
 
-        // CENTER - TOP : 트랜스포트
         egui::TopBottomPanel::top(Transport::FRAME_NAME)
             .frame(egui::Frame::new().inner_margin(Transport::INNER_MARGIN).fill(fill))
             .exact_height(Transport::HEIGHT)
             .resizable(Transport::RESIZABLE)
             .show(ctx, |ui| transport.draw(ui, self));
 
-        // CENTER - MAIN : 피아노 롤 / 그리드
         egui::CentralPanel::default()
             .frame(egui::Frame::new().inner_margin(NoteGrid::INNER_MARGIN).fill(fill))
             .show(ctx, |ui| {
                 note_grid.draw(ui, self);
-
-                // 메시지 박스 표시
                 get_message_box().lock().unwrap().draw(ui);
             });
 
-        // 재생 중일 때는 실시간으로 화면 업데이트
-        if is_playing { ctx.request_repaint(); }
+        // 재생 중이거나 로딩 중일 때는 외부 입력이 없어도 UI를 계속 갱신한다.
+        if is_playing || is_loading {
+            ctx.request_repaint();
+        }
     }
 }
