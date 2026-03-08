@@ -12,7 +12,7 @@ impl Frame for Transport {
     const HEIGHT: f32 = 52.0;
     const RESIZABLE: bool = false;
 
-    // 재생 제어 버튼과 탐색 슬라이더를 그리고 SharedAudioState를 직접 갱신한다.
+    /// 재생 제어 버튼과 탐색 슬라이더를 그리고 SharedAudioState를 직접 갱신한다.
     fn draw(&mut self, ui: &mut egui::Ui, app: &mut MidiApp) {
         let midi_manager = app.midi_manager.lock().unwrap();
         let is_loading = midi_manager.is_loading();

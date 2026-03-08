@@ -40,7 +40,7 @@ pub struct MidiApp {
 impl MidiApp {
     pub const APP_NAME: &str = "MIDI Editor";
 
-    // 앱 폰트와 오디오 시스템을 초기화하고 egui 네이티브 창을 띄운다.
+    /// 앱 폰트와 오디오 시스템을 초기화하고 egui 네이티브 창을 띄운다.
     pub fn run() -> Result<(), Error> {
         let options = NativeOptions {
             viewport: ViewportBuilder::default().with_inner_size([1280.0, 720.0]),
@@ -86,7 +86,7 @@ impl MidiApp {
         )
     }
 
-    // 백그라운드 로더가 남긴 성공/실패 결과를 메인 스레드 상태에 반영한다.
+    /// 백그라운드 로더가 남긴 성공/실패 결과를 메인 스레드 상태에 반영한다.
     fn process_load_results(&mut self) {
         let pending_result = self
             .midi_manager
@@ -118,7 +118,7 @@ impl MidiApp {
         }
     }
 
-    // 현재 Song과 솔로/뮤트 상태를 기준으로 재생 타임라인을 다시 만든다.
+    /// 현재 Song과 솔로/뮤트 상태를 기준으로 재생 타임라인을 다시 만든다.
     fn refresh_playback_data(&mut self, reset_cursor: bool) {
         let playback_data = self
             .midi_manager
@@ -137,7 +137,7 @@ impl MidiApp {
         }
     }
 
-    // 파일 선택 대화상자를 열고 실제 파싱은 백그라운드 스레드에서 수행한다.
+    /// 파일 선택 대화상자를 열고 실제 파싱은 백그라운드 스레드에서 수행한다.
     fn open_file(&mut self) {
         if self.midi_manager.lock().unwrap().is_loading() {
             return;
@@ -169,7 +169,7 @@ impl MidiApp {
         });
     }
 
-    // 현재 열린 곡과 재생 상태를 모두 닫는다.
+    /// 현재 열린 곡과 재생 상태를 모두 닫는다.
     fn close(&mut self) {
         self.midi_manager.lock().unwrap().close();
         self.shared_state.lock().unwrap().clear_playback();
@@ -178,7 +178,7 @@ impl MidiApp {
         self.solo_track = None;
     }
 
-    // 재생 직전에 최신 트랙 설정으로 타임라인을 갱신한 뒤 재생을 시작한다.
+    /// 재생 직전에 최신 트랙 설정으로 타임라인을 갱신한 뒤 재생을 시작한다.
     fn play(&mut self) {
         self.refresh_playback_data(false);
         let mut shared_state = self.shared_state.lock().unwrap();
@@ -188,7 +188,7 @@ impl MidiApp {
         shared_state.set_playing(true);
     }
 
-    // 정지 시에는 재생을 끊고 커서를 처음으로 되돌린다.
+    /// 정지 시에는 재생을 끊고 커서를 처음으로 되돌린다.
     fn stop(&mut self) {
         let mut shared_state = self.shared_state.lock().unwrap();
         shared_state.set_playing(false);
@@ -197,7 +197,7 @@ impl MidiApp {
 }
 
 impl App for MidiApp {
-    // 매 프레임마다 로드 결과를 처리하고 각 패널을 최신 상태로 다시 그린다.
+    /// 매 프레임마다 로드 결과를 처리하고 각 패널을 최신 상태로 다시 그린다.
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.process_load_results();
 

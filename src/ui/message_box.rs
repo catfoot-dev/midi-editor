@@ -20,21 +20,21 @@ impl Default for MessageBox {
 impl MessageBox {
     const WIDTH: f32 = 200.0;
 
-    // 일반 정보 메시지를 띄운다.
+    /// 일반 정보 메시지를 띄운다.
     pub fn show(&mut self, message: impl Into<String>) {
         self.caption = "OK".to_string();
         self.message = message.into();
         self.is_open = true;
     }
 
-    // 오류 메시지를 띄운다.
+    /// 오류 메시지를 띄운다.
     pub fn error(&mut self, message: impl Into<String>) {
         self.caption = "Error".to_string();
         self.message = message.into();
         self.is_open = true;
     }
 
-    // 중앙 모달을 그리고 닫힘 상태를 동기화한다.
+    /// 중앙 모달을 그리고 닫힘 상태를 동기화한다.
     pub fn draw(&mut self, ui: &mut egui::Ui) {
         if !self.is_open {
             return;

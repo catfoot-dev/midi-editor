@@ -35,7 +35,7 @@ impl Frame for NoteGrid {
     const HEIGHT: f32 = 0.0;
     const RESIZABLE: bool = true;
 
-    // note span과 현재 재생 커서를 이용해 피아노 롤과 타임라인을 그린다.
+    /// note span과 현재 재생 커서를 이용해 피아노 롤과 타임라인을 그린다.
     fn draw(&mut self, ui: &mut egui::Ui, app: &mut MidiApp) {
         let rect = ui.response().rect;
         let label_width = 35.0;

@@ -46,7 +46,7 @@ pub struct TrackModel {
 }
 
 impl TrackModel {
-    // 트랙 이름이 비어 있으면 악기 이름을 대체 표기로 사용한다.
+    /// 트랙 이름이 비어 있으면 악기 이름을 대체 표기로 사용한다.
     pub fn display_name(&self) -> &str {
         if self.name.is_empty() {
             &self.instrument_name
@@ -55,7 +55,7 @@ impl TrackModel {
         }
     }
 
-    // General MIDI 규약의 타악기 채널(10번, 0-based로는 9번) 여부를 반환한다.
+    /// General MIDI 규약의 타악기 채널(10번, 0-based로는 9번) 여부를 반환한다.
     pub fn is_percussion(&self) -> bool {
         self.channel == 9
     }
@@ -72,12 +72,12 @@ pub struct Song {
 }
 
 impl Song {
-    // 로드된 곡에 실제 트랙 데이터가 있는지 확인한다.
+    /// 로드된 곡에 실제 트랙 데이터가 있는지 확인한다.
     pub fn is_empty(&self) -> bool {
         self.tracks.is_empty()
     }
 
-    // 상단 UI에서 표시할 대표 제목을 선택한다.
+    /// 상단 UI에서 표시할 대표 제목을 선택한다.
     pub fn display_title(&self) -> Option<&str> {
         if !self.meta.title.is_empty() {
             Some(self.meta.title.as_str())
@@ -88,7 +88,7 @@ impl Song {
         }
     }
 
-    // tick 값을 그리드 렌더링에 사용할 beat 단위로 변환한다.
+    /// tick 값을 그리드 렌더링에 사용할 beat 단위로 변환한다.
     pub fn beats_for_ticks(&self, ticks: u64) -> f32 {
         if self.ppq == 0 {
             0.0
@@ -97,17 +97,17 @@ impl Song {
         }
     }
 
-    // tempo map을 기준으로 특정 tick의 실제 시간을 계산한다.
+    /// tempo map을 기준으로 특정 tick의 실제 시간을 계산한다.
     pub fn seconds_for_tick(&self, tick: u64) -> f64 {
         seconds_for_tick_with_tempo(self.ppq, &self.tempo_changes, tick)
     }
 
-    // 재생 스케줄링을 위해 tick을 샘플 인덱스로 변환한다.
+    /// 재생 스케줄링을 위해 tick을 샘플 인덱스로 변환한다.
     pub fn sample_index_for_tick(&self, tick: u64, sample_rate: u32) -> usize {
         (self.seconds_for_tick(tick) * sample_rate as f64).round() as usize
     }
 
-    // 현재 재생 샘플 위치를 다시 MIDI tick으로 역변환한다.
+    /// 현재 재생 샘플 위치를 다시 MIDI tick으로 역변환한다.
     pub fn tick_for_sample(&self, sample_index: usize, sample_rate: u32) -> u64 {
         if sample_rate == 0 {
             return 0;
@@ -120,7 +120,7 @@ impl Song {
         )
     }
 
-    // 현재 트랙 상태를 바탕으로 오디오 스레드가 읽을 재생 이벤트 목록을 만든다.
+    /// 현재 트랙 상태를 바탕으로 오디오 스레드가 읽을 재생 이벤트 목록을 만든다.
     pub fn playback_data(&self, sample_rate: u32, solo_track: Option<usize>) -> PlaybackData {
         let mut events = Vec::new();
 
@@ -194,7 +194,7 @@ pub enum PlaybackEventKind {
 }
 
 impl PlaybackEventKind {
-    // 같은 sample_index 안에서 이벤트 적용 순서를 결정한다.
+    /// 같은 sample_index 안에서 이벤트 적용 순서를 결정한다.
     fn sort_priority(&self) -> u8 {
         match self {
             Self::ProgramChange { .. } => 0,
@@ -203,7 +203,7 @@ impl PlaybackEventKind {
         }
     }
 
-    // 정렬 안정성을 위해 노트 계열 이벤트의 키 값을 꺼낸다.
+    /// 정렬 안정성을 위해 노트 계열 이벤트의 키 값을 꺼낸다.
     fn note_key(&self) -> u8 {
         match self {
             Self::ProgramChange { .. } => 0,
@@ -225,7 +225,7 @@ pub struct PlaybackData {
     pub events: Arc<[PlaybackEvent]>,
 }
 
-// tempo map을 순회하며 tick 누적 시간을 초 단위로 적분한다.
+/// tempo map을 순회하며 tick 누적 시간을 초 단위로 적분한다.
 pub fn seconds_for_tick_with_tempo(ppq: u16, tempo_changes: &[TempoChange], tick: u64) -> f64 {
     if ppq == 0 || tick == 0 {
         return 0.0;
@@ -253,7 +253,7 @@ pub fn seconds_for_tick_with_tempo(ppq: u16, tempo_changes: &[TempoChange], tick
     seconds + ticks_passed as f64 * current_tempo as f64 / 1_000_000.0 / ppq as f64
 }
 
-// 초 단위 시간을 tempo map 기준의 tick 위치로 역산한다.
+/// 초 단위 시간을 tempo map 기준의 tick 위치로 역산한다.
 pub fn tick_for_seconds_with_tempo(ppq: u16, tempo_changes: &[TempoChange], seconds: f64) -> u64 {
     if ppq == 0 || seconds <= 0.0 {
         return 0;

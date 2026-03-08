@@ -10,7 +10,7 @@ impl Frame for Attributes {
     const HEIGHT: f32 = 0.0;
     const RESIZABLE: bool = false;
 
-    // 현재 선택된 트랙의 요약 정보를 읽기 전용으로 보여 준다.
+    /// 현재 선택된 트랙의 요약 정보를 읽기 전용으로 보여 준다.
     fn draw(&mut self, ui: &mut egui::Ui, app: &mut MidiApp) {
         self.header(ui);
 

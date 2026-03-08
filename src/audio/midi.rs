@@ -48,68 +48,68 @@ pub struct MidiManager {
 }
 
 impl MidiManager {
-    // 곡 로드가 끝났고 현재 참조 가능한 Song이 있는지 확인한다.
+    /// 곡 로드가 끝났고 현재 참조 가능한 Song이 있는지 확인한다.
     pub fn is_loaded(&self) -> bool {
         !self.is_loading && self.song.is_some()
     }
 
-    // 백그라운드 로딩 중인지 UI가 확인할 때 사용한다.
+    /// 백그라운드 로딩 중인지 UI가 확인할 때 사용한다.
     pub fn is_loading(&self) -> bool {
         self.is_loading
     }
 
-    // 읽기 전용 Song 참조를 반환한다.
+    /// 읽기 전용 Song 참조를 반환한다.
     pub fn song(&self) -> Option<&Song> {
         self.song.as_ref()
     }
 
-    // 트랙 설정 수정처럼 Song 내부를 갱신해야 할 때 사용한다.
+    /// 트랙 설정 수정처럼 Song 내부를 갱신해야 할 때 사용한다.
     pub fn song_mut(&mut self) -> Option<&mut Song> {
         self.song.as_mut()
     }
 
-    // 새 파일 로드를 시작하기 전에 상태를 로딩 중으로 전환한다.
+    /// 새 파일 로드를 시작하기 전에 상태를 로딩 중으로 전환한다.
     pub fn begin_loading(&mut self) {
         self.is_loading = true;
         self.pending_result = None;
     }
 
-    // 백그라운드 스레드가 성공 결과를 전달할 때 호출된다.
+    /// 백그라운드 스레드가 성공 결과를 전달할 때 호출된다.
     pub fn finish_loading(&mut self, file_name: String, song: Song) {
         self.is_loading = false;
         self.pending_result = Some(LoadResult::Success(LoadedSong { file_name, song }));
     }
 
-    // 백그라운드 스레드가 실패 원인을 전달할 때 호출된다.
+    /// 백그라운드 스레드가 실패 원인을 전달할 때 호출된다.
     pub fn finish_loading_error(&mut self, error: String) {
         self.is_loading = false;
         self.pending_result = Some(LoadResult::Error(error));
     }
 
-    // 메인 스레드가 아직 처리하지 않은 로드 결과를 한 번만 꺼낸다.
+    /// 메인 스레드가 아직 처리하지 않은 로드 결과를 한 번만 꺼낸다.
     pub fn take_pending_result(&mut self) -> Option<LoadResult> {
         self.pending_result.take()
     }
 
-    // 성공적으로 로드된 Song을 현재 상태로 교체한다.
+    /// 성공적으로 로드된 Song을 현재 상태로 교체한다.
     pub fn apply_song(&mut self, song: Song) {
         self.song = Some(song);
     }
 
-    // 곡 닫기 시 로딩 상태와 현재 Song을 함께 비운다.
+    /// 곡 닫기 시 로딩 상태와 현재 Song을 함께 비운다.
     pub fn close(&mut self) {
         self.is_loading = false;
         self.pending_result = None;
         self.song = None;
     }
 
-    // 파일 시스템에서 MIDI 파일을 읽고 Song으로 파싱한다.
+    /// 파일 시스템에서 MIDI 파일을 읽고 Song으로 파싱한다.
     pub fn load_file(file_path: &Path) -> Result<Song, MidiLoadError> {
         let data = std::fs::read(file_path).map_err(MidiLoadError::Io)?;
         Self::parse_bytes(&data)
     }
 
-    // raw MIDI 바이트를 파싱해 트랙/tempo/note span 구조로 정규화한다.
+    /// raw MIDI 바이트를 파싱해 트랙/tempo/note span 구조로 정규화한다.
     fn parse_bytes(data: &[u8]) -> Result<Song, MidiLoadError> {
         let smf = Smf::parse(data).map_err(MidiLoadError::Parse)?;
         let ppq = match smf.header.timing {
@@ -148,7 +148,7 @@ impl MidiManager {
             tracks.push(parsed_track.finish());
         }
 
-        // tempo 이벤트는 트랙 순서와 무관하게 절대 tick 기준으로 다시 정렬한다.
+        /// tempo 이벤트는 트랙 순서와 무관하게 절대 tick 기준으로 다시 정렬한다.
         let tempo_changes = normalize_tempo_changes(tempo_changes);
         let total_seconds = seconds_for_tick_with_tempo(ppq, &tempo_changes, total_ticks);
 
@@ -175,7 +175,7 @@ struct TrackAccumulator {
 }
 
 impl TrackAccumulator {
-    // 파싱 중 사용할 임시 트랙 버퍼를 초기화한다.
+    /// 파싱 중 사용할 임시 트랙 버퍼를 초기화한다.
     fn new(track_index: usize) -> Self {
         Self {
             track_index,
@@ -189,7 +189,7 @@ impl TrackAccumulator {
         }
     }
 
-    // note off 또는 velocity 0 note on을 만나면 가장 앞선 note on과 짝을 맞춘다.
+    /// note off 또는 velocity 0 note on을 만나면 가장 앞선 note on과 짝을 맞춘다.
     fn close_note(&mut self, key: u8, end_tick: u64) {
         if let Some(notes) = self.active_notes.get_mut(&key)
             && let Some(active_note) = notes.pop_front()
@@ -203,7 +203,7 @@ impl TrackAccumulator {
         }
     }
 
-    // 파일이 비정상적이더라도 열린 노트는 트랙 끝에서 닫아 시각화와 재생을 유지한다.
+    /// 파일이 비정상적이더라도 열린 노트는 트랙 끝에서 닫아 시각화와 재생을 유지한다.
     fn close_dangling_notes(&mut self, end_tick: u64) {
         for (key, active_notes) in &mut self.active_notes {
             while let Some(active_note) = active_notes.pop_front() {
@@ -217,7 +217,7 @@ impl TrackAccumulator {
         }
     }
 
-    // 정렬과 기본 UI 상태를 마무리한 뒤 최종 TrackModel로 변환한다.
+    /// 정렬과 기본 UI 상태를 마무리한 뒤 최종 TrackModel로 변환한다.
     fn finish(mut self) -> TrackModel {
         self.note_spans
             .sort_by_key(|note| (note.start_tick, note.end_tick, note.key));

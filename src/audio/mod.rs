@@ -58,7 +58,7 @@ impl fmt::Display for AudioInitError {
 impl std::error::Error for AudioInitError {}
 
 impl Audio {
-    // 출력 장치와 SoundFont를 초기화하고 오디오 스트림을 시작한다.
+    /// 출력 장치와 SoundFont를 초기화하고 오디오 스트림을 시작한다.
     pub fn new(state: Arc<Mutex<SharedAudioState>>) -> Result<Self, AudioInitError> {
         let host = cpal::default_host();
         let device = host

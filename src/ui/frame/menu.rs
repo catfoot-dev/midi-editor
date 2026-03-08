@@ -14,7 +14,7 @@ impl Frame for Menu {
     const HEIGHT: f32 = 23.0;
     const RESIZABLE: bool = false;
 
-    // 상단 메뉴에서 파일 열기/닫기와 패널 표시 토글을 처리한다.
+    /// 상단 메뉴에서 파일 열기/닫기와 패널 표시 토글을 처리한다.
     fn draw(&mut self, ui: &mut egui::Ui, app: &mut MidiApp) {
         let ctrl = if OS == "macos" { "⌘" } else { "Ctrl +" };
         let is_loading = app.midi_manager.lock().unwrap().is_loading();

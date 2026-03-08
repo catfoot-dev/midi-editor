@@ -26,7 +26,7 @@ impl Frame for Keyboard {
     const HEIGHT: f32 = 174.0;
     const RESIZABLE: bool = false;
 
-    // 현재 재생 커서에 맞춰 눌린 건반을 계산해 하단 키보드를 렌더링한다.
+    /// 현재 재생 커서에 맞춰 눌린 건반을 계산해 하단 키보드를 렌더링한다.
     fn draw(&mut self, ui: &mut egui::Ui, app: &mut MidiApp) {
         self.header(ui);
 

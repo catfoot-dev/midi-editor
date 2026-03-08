@@ -15,7 +15,7 @@ impl Frame for TrackList {
     const HEIGHT: f32 = 0.0;
     const RESIZABLE: bool = false;
 
-    // 트랙 목록과 확장 편집 UI를 테이블 형태로 렌더링한다.
+    /// 트랙 목록과 확장 편집 UI를 테이블 형태로 렌더링한다.
     fn draw(&mut self, ui: &mut egui::Ui, app: &mut MidiApp) {
         use egui_extras::{Column, TableBuilder};
 
@@ -43,7 +43,7 @@ impl Frame for TrackList {
 }
 
 impl TrackList {
-    // 트랙별 솔로/뮤트/채널/악기 편집을 반영하고 필요하면 재생 타임라인을 갱신한다.
+    /// 트랙별 솔로/뮤트/채널/악기 편집을 반영하고 필요하면 재생 타임라인을 갱신한다.
     fn set_track(&mut self, body: &mut egui_extras::TableBody<'_>, app: &mut MidiApp) {
         let mut playback_dirty = false;
 
