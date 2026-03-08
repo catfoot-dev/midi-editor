@@ -2,6 +2,8 @@
 
 **A simple, cross-platform, open-source MIDI editor built with Rust.**
 
+![demo screenshot](https://github.com/catfoot-dev/midi-editor/blob/main/docs/demo.png?raw=true)
+
 ---
 
 ## Highlights
