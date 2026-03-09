@@ -5,24 +5,28 @@ use std::{
 
 use eframe::{App, Error, NativeOptions};
 use egui::{
-    epaint::text::{FontInsert, FontPriority, InsertFontFamily},
     Color32, Context, FontData, FontFamily, ViewportBuilder,
+    epaint::text::{FontInsert, FontPriority, InsertFontFamily},
 };
 use rfd::FileDialog;
 
 use crate::{
-    audio::{midi::{LoadResult, MidiManager}, state::SharedAudioState, Audio},
+    audio::{
+        Audio,
+        midi::{LoadResult, MidiManager},
+        state::SharedAudioState,
+    },
     ui::{
         frame::{
-            attributes::Attributes, keyboard::Keyboard, menu::Menu, note_grid::NoteGrid,
-            track_list::TrackList, transport::Transport, Frame,
+            Frame, attributes::Attributes, keyboard::Keyboard, menu::Menu, note_grid::NoteGrid,
+            track_list::TrackList, transport::Transport,
         },
         message_box::get_message_box,
     },
 };
 
-pub mod message_box;
 mod frame;
+pub mod message_box;
 
 pub struct MidiApp {
     audio: Audio,
@@ -65,10 +69,9 @@ impl MidiApp {
                 cc.egui_ctx.add_font(font);
 
                 let shared_state = Arc::new(Mutex::new(SharedAudioState::default()));
-                let audio = Audio::new(shared_state.clone())
-                    .map_err(|error| -> Box<dyn std::error::Error + Send + Sync> {
-                        Box::new(error)
-                    })?;
+                let audio = Audio::new(shared_state.clone()).map_err(
+                    |error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(error) },
+                )?;
 
                 Ok(Box::new(MidiApp {
                     audio,
@@ -88,11 +91,7 @@ impl MidiApp {
 
     /// 백그라운드 로더가 남긴 성공/실패 결과를 메인 스레드 상태에 반영한다.
     fn process_load_results(&mut self) {
-        let pending_result = self
-            .midi_manager
-            .lock()
-            .unwrap()
-            .take_pending_result();
+        let pending_result = self.midi_manager.lock().unwrap().take_pending_result();
 
         match pending_result {
             Some(LoadResult::Success(loaded_song)) => {
@@ -217,14 +216,22 @@ impl App for MidiApp {
         let mut note_grid = NoteGrid;
 
         egui::TopBottomPanel::top(Menu::FRAME_NAME)
-            .frame(egui::Frame::new().inner_margin(Menu::INNER_MARGIN).fill(fill))
+            .frame(
+                egui::Frame::new()
+                    .inner_margin(Menu::INNER_MARGIN)
+                    .fill(fill),
+            )
             .exact_height(Menu::HEIGHT)
             .resizable(Menu::RESIZABLE)
             .show(ctx, |ui| menu.draw(ui, self));
 
         if self.show_keyboard {
             egui::TopBottomPanel::bottom(Keyboard::FRAME_NAME)
-                .frame(egui::Frame::new().inner_margin(Keyboard::INNER_MARGIN).fill(fill))
+                .frame(
+                    egui::Frame::new()
+                        .inner_margin(Keyboard::INNER_MARGIN)
+                        .fill(fill),
+                )
                 .exact_height(Keyboard::HEIGHT)
                 .resizable(Keyboard::RESIZABLE)
                 .show(ctx, |ui| keyboard.draw(ui, self));
@@ -232,7 +239,11 @@ impl App for MidiApp {
 
         if self.show_track_list {
             egui::SidePanel::left(TrackList::FRAME_NAME)
-                .frame(egui::Frame::new().inner_margin(TrackList::INNER_MARGIN).fill(fill))
+                .frame(
+                    egui::Frame::new()
+                        .inner_margin(TrackList::INNER_MARGIN)
+                        .fill(fill),
+                )
                 .exact_width(TrackList::WIDTH)
                 .resizable(TrackList::RESIZABLE)
                 .show(ctx, |ui| track_list.draw(ui, self));
@@ -240,20 +251,32 @@ impl App for MidiApp {
 
         if self.show_attributes {
             egui::SidePanel::right(Attributes::FRAME_NAME)
-                .frame(egui::Frame::new().inner_margin(Attributes::INNER_MARGIN).fill(fill))
+                .frame(
+                    egui::Frame::new()
+                        .inner_margin(Attributes::INNER_MARGIN)
+                        .fill(fill),
+                )
                 .exact_width(Attributes::WIDTH)
                 .resizable(Attributes::RESIZABLE)
                 .show(ctx, |ui| attributes.draw(ui, self));
         }
 
         egui::TopBottomPanel::top(Transport::FRAME_NAME)
-            .frame(egui::Frame::new().inner_margin(Transport::INNER_MARGIN).fill(fill))
+            .frame(
+                egui::Frame::new()
+                    .inner_margin(Transport::INNER_MARGIN)
+                    .fill(fill),
+            )
             .exact_height(Transport::HEIGHT)
             .resizable(Transport::RESIZABLE)
             .show(ctx, |ui| transport.draw(ui, self));
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().inner_margin(NoteGrid::INNER_MARGIN).fill(fill))
+            .frame(
+                egui::Frame::new()
+                    .inner_margin(NoteGrid::INNER_MARGIN)
+                    .fill(fill),
+            )
             .show(ctx, |ui| {
                 note_grid.draw(ui, self);
                 get_message_box().lock().unwrap().draw(ui);

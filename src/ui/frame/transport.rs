@@ -1,6 +1,6 @@
 use egui::{Color32, Margin, Slider, SliderOrientation};
 
-use crate::ui::{frame::Frame, MidiApp};
+use crate::ui::{MidiApp, frame::Frame};
 
 #[derive(Default)]
 pub struct Transport;
@@ -109,7 +109,8 @@ impl Frame for Transport {
                                 app.stop();
                             }
 
-                            let repeat_btn = egui::Button::new(if repeat_enabled { "🔁" } else { "❶" });
+                            let repeat_btn =
+                                egui::Button::new(if repeat_enabled { "🔁" } else { "❶" });
                             if ui
                                 .add_enabled(is_file_open, repeat_btn)
                                 .on_hover_text("Once/Repeat")
@@ -129,9 +130,9 @@ impl Frame for Transport {
                             ui.spacing_mut().slider_width = 200.0;
                             let response = ui.add_enabled(is_file_open, control_slider);
                             if response.drag_stopped() && song_length_samples > 0 {
-                                let sample_index = ((value as f64 / 1000.0)
-                                    * song_length_samples as f64)
-                                    .round() as usize;
+                                let sample_index =
+                                    ((value as f64 / 1000.0) * song_length_samples as f64).round()
+                                        as usize;
                                 app.shared_state.lock().unwrap().seek_samples(sample_index);
                             }
                         });

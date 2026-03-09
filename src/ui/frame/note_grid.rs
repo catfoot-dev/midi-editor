@@ -1,6 +1,6 @@
 use egui::{Color32, Pos2, Stroke};
 
-use crate::ui::{frame::Frame, MidiApp};
+use crate::ui::{MidiApp, frame::Frame};
 
 const NOTE_NAMES: &[&str] = &[
     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
@@ -58,9 +58,8 @@ impl Frame for NoteGrid {
         } else {
             beats_width / song.ppq as f32
         };
-        let max_width = label_width
-            + song.beats_for_ticks(song.total_ticks) * beats_width
-            + beats_width;
+        let max_width =
+            label_width + song.beats_for_ticks(song.total_ticks) * beats_width + beats_width;
         let max_width = max_width.max(ui.available_width());
 
         egui::ScrollArea::both()

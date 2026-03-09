@@ -2,7 +2,7 @@ use egui::Color32;
 
 use crate::{
     midi::instruments::{DRUM_KITS, MIDI_GROUPS, MIDI_INSTRUMENTS},
-    ui::{frame::Frame, MidiApp},
+    ui::{MidiApp, frame::Frame},
 };
 
 #[derive(Default)]

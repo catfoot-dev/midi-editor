@@ -7,8 +7,8 @@ use std::{
 use midly::{MetaMessage, MidiMessage, Smf, Timing, TrackEventKind};
 
 use crate::audio::midi_struct::{
-    seconds_for_tick_with_tempo, NoteSpan, ProgramChangeEvent, Song, SongMeta, TempoChange,
-    TrackModel,
+    NoteSpan, ProgramChangeEvent, Song, SongMeta, TempoChange, TrackModel,
+    seconds_for_tick_with_tempo,
 };
 
 #[derive(Debug)]
@@ -134,10 +134,21 @@ impl MidiManager {
 
                 match event.kind {
                     TrackEventKind::Meta(message) => {
-                        apply_meta_event(message, current_tick, &mut meta, &mut parsed_track, &mut tempo_changes);
+                        apply_meta_event(
+                            message,
+                            current_tick,
+                            &mut meta,
+                            &mut parsed_track,
+                            &mut tempo_changes,
+                        );
                     }
                     TrackEventKind::Midi { channel, message } => {
-                        apply_midi_event(channel.as_int(), message, current_tick, &mut parsed_track);
+                        apply_midi_event(
+                            channel.as_int(),
+                            message,
+                            current_tick,
+                            &mut parsed_track,
+                        );
                     }
                     _ => {}
                 }
@@ -148,7 +159,7 @@ impl MidiManager {
             tracks.push(parsed_track.finish());
         }
 
-        /// tempo 이벤트는 트랙 순서와 무관하게 절대 tick 기준으로 다시 정렬한다.
+        // tempo 이벤트는 트랙 순서와 무관하게 절대 tick 기준으로 다시 정렬한다.
         let tempo_changes = normalize_tempo_changes(tempo_changes);
         let total_seconds = seconds_for_tick_with_tempo(ppq, &tempo_changes, total_ticks);
 
@@ -389,8 +400,8 @@ mod tests {
     use std::io::Cursor;
 
     use midly::{
-        num::{u15, u24, u28, u4, u7},
         Format, Header, MetaMessage, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind,
+        num::{u4, u7, u15, u24, u28},
     };
 
     use super::MidiManager;

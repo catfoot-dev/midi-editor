@@ -1,6 +1,6 @@
 use cpal::{
-    traits::{DeviceTrait, HostTrait, StreamTrait},
     FromSample, Sample, SampleFormat, SizedSample,
+    traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use rustysynth::{SoundFont, SoundFontError, Synthesizer, SynthesizerError, SynthesizerSettings};
 use std::{
@@ -77,9 +77,8 @@ impl Audio {
             .join("GeneralUser-GS.sf2");
         let mut sound_font_file =
             File::open(sound_font_path).map_err(AudioInitError::OpenSoundFont)?;
-        let sound_font = Arc::new(
-            SoundFont::new(&mut sound_font_file).map_err(AudioInitError::ParseSoundFont)?,
-        );
+        let sound_font =
+            Arc::new(SoundFont::new(&mut sound_font_file).map_err(AudioInitError::ParseSoundFont)?);
         let settings = SynthesizerSettings::new(sample_rate as i32);
         let synthesizer =
             Synthesizer::new(&sound_font, &settings).map_err(AudioInitError::CreateSynth)?;
@@ -125,7 +124,14 @@ where
     device.build_output_stream(
         config,
         move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-            render_output_block(data, channels, &state, &mut synthesizer, &mut left, &mut right)
+            render_output_block(
+                data,
+                channels,
+                &state,
+                &mut synthesizer,
+                &mut left,
+                &mut right,
+            )
         },
         |error| eprintln!("Audio Error: {error}"),
         None,

@@ -1,4 +1,4 @@
-use crate::ui::{frame::Frame, MidiApp};
+use crate::ui::{MidiApp, frame::Frame};
 
 #[derive(Default)]
 pub struct Attributes;

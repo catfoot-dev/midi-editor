@@ -1,5 +1,5 @@
-use std::sync::{LazyLock, Mutex};
 use egui::{Id, Modal};
+use std::sync::{LazyLock, Mutex};
 
 pub struct MessageBox {
     caption: String,
@@ -40,26 +40,32 @@ impl MessageBox {
             return;
         }
 
-        let modal = Modal::new(Id::new("MessageBox"))
-            .show(ui.ctx(), |ui| {
-                ui.set_width(MessageBox::WIDTH);
-                ui.heading(&self.caption);
-                ui.add_space(8.0);
-                ui.label(&self.message);
-                ui.add_space(24.0);
+        let modal = Modal::new(Id::new("MessageBox")).show(ui.ctx(), |ui| {
+            ui.set_width(MessageBox::WIDTH);
+            ui.heading(&self.caption);
+            ui.add_space(8.0);
+            ui.label(&self.message);
+            ui.add_space(24.0);
 
-                egui::Sides::new().show(ui, |_ui| {}, |ui| {
-                    if ui.button("OK").clicked() { ui.close(); }
-                });
-            });
+            egui::Sides::new().show(
+                ui,
+                |_ui| {},
+                |ui| {
+                    if ui.button("OK").clicked() {
+                        ui.close();
+                    }
+                },
+            );
+        });
 
-        if modal.should_close() { self.is_open = false; }
+        if modal.should_close() {
+            self.is_open = false;
+        }
     }
 }
 
-static MESSAGE_BOX: LazyLock<Mutex<MessageBox>> = LazyLock::new(|| {
-    Mutex::new(MessageBox::default())
-});
+static MESSAGE_BOX: LazyLock<Mutex<MessageBox>> =
+    LazyLock::new(|| Mutex::new(MessageBox::default()));
 
 pub fn get_message_box() -> &'static Mutex<MessageBox> {
     // 앱 전역에서 하나의 메시지 박스를 공유한다.

@@ -37,9 +37,8 @@ impl SharedAudioState {
         if reset_cursor {
             self.playback_cursor_samples = 0;
         } else {
-            self.playback_cursor_samples = self
-                .playback_cursor_samples
-                .min(self.song_length_samples);
+            self.playback_cursor_samples =
+                self.playback_cursor_samples.min(self.song_length_samples);
         }
         // seek 이후 바로 이어서 재생할 수 있도록 이벤트 커서를 현재 샘플 위치에 맞춘다.
         self.event_cursor = self.find_event_cursor(self.playback_cursor_samples);

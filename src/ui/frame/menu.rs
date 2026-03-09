@@ -2,7 +2,7 @@ use std::env::consts::OS;
 
 use egui::{Color32, Margin};
 
-use crate::ui::{frame::Frame, MidiApp};
+use crate::ui::{MidiApp, frame::Frame};
 
 #[derive(Default)]
 pub struct Menu;
@@ -39,20 +39,20 @@ impl Frame for Menu {
                     });
 
                     ui.menu_button("Window", |ui| {
-                        let track_list_btn = egui::Button::new("TrackList")
-                            .shortcut_text(format!("{} T", ctrl));
+                        let track_list_btn =
+                            egui::Button::new("TrackList").shortcut_text(format!("{} T", ctrl));
                         if ui.add(track_list_btn).clicked() {
                             app.show_track_list = !app.show_track_list;
                         }
 
-                        let attributes_btn = egui::Button::new("Attributes")
-                            .shortcut_text(format!("{} A", ctrl));
+                        let attributes_btn =
+                            egui::Button::new("Attributes").shortcut_text(format!("{} A", ctrl));
                         if ui.add(attributes_btn).clicked() {
                             app.show_attributes = !app.show_attributes;
                         }
 
-                        let keyboard_btn = egui::Button::new("Keyboard")
-                            .shortcut_text(format!("{} K", ctrl));
+                        let keyboard_btn =
+                            egui::Button::new("Keyboard").shortcut_text(format!("{} K", ctrl));
                         if ui.add(keyboard_btn).clicked() {
                             app.show_keyboard = !app.show_keyboard;
                         }
