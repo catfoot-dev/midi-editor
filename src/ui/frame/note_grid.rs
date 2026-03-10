@@ -1,3 +1,5 @@
+use std::hash::{DefaultHasher, Hash, Hasher};
+
 use egui::{Color32, Pos2, Stroke};
 
 use crate::ui::{MidiApp, frame::Frame};
@@ -6,24 +8,16 @@ const NOTE_NAMES: &[&str] = &[
     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
 ];
 
-const CHANNEL_COLORS: [Color32; 16] = [
-    Color32::from_rgb(197, 131, 56),
-    Color32::from_rgb(19, 178, 210),
-    Color32::from_rgb(232, 198, 29),
-    Color32::from_rgb(198, 200, 54),
-    Color32::from_rgb(208, 96, 145),
-    Color32::from_rgb(71, 165, 114),
-    Color32::from_rgb(229, 108, 77),
-    Color32::from_rgb(99, 128, 222),
-    Color32::from_rgb(209, 154, 102),
-    Color32::from_rgb(134, 167, 60),
-    Color32::from_rgb(61, 185, 154),
-    Color32::from_rgb(211, 102, 123),
-    Color32::from_rgb(162, 121, 255),
-    Color32::from_rgb(94, 201, 255),
-    Color32::from_rgb(255, 170, 70),
-    Color32::from_rgb(140, 140, 140),
-];
+fn generate_color(track_index: usize, channel: u8) -> Color32 {
+    let mut hasher = DefaultHasher::new();
+    track_index.hash(&mut hasher);
+    channel.hash(&mut hasher);
+    let value = hasher.finish();
+
+    let bytes = value.to_le_bytes();
+    let [red, green, blue, ..] = bytes;
+    Color32::from_rgb(red, green, blue)
+}
 
 #[derive(Default)]
 pub struct NoteGrid;
@@ -96,7 +90,7 @@ impl Frame for NoteGrid {
                     Some(track_index) => track.track_index == track_index && !track.is_muted,
                     None => !track.is_muted,
                 }) {
-                    let color = CHANNEL_COLORS[track.channel as usize % CHANNEL_COLORS.len()];
+                    let color = generate_color(track.track_index, track.channel);
                     for note in &track.note_spans {
                         let x = grid_start_x + note.start_tick as f32 * tick_width;
                         let end_x = grid_start_x + note.end_tick as f32 * tick_width;
